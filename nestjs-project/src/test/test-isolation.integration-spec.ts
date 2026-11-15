@@ -62,19 +62,27 @@ describe('Test isolation (integration)', () => {
   });
 
   it('should not alter the development database when writing in tests', async () => {
-    const countDevUsers = async () =>
-      Number(
-        (
-          await devDb.query<{ count: string }[]>('SELECT count(*) FROM users')
-        )[0].count,
+    // The development database may not be migrated (fresh clone, recreated
+    // container): a missing table simply means there is nothing to alter.
+    const countDevUsersByEmail = async (email: string) => {
+      const [{ exists }] = await devDb.query<{ exists: boolean }[]>(
+        `SELECT to_regclass('public.users') IS NOT NULL AS exists`,
       );
-    const before = await countDevUsers();
+      if (!exists) return 0;
+      const [{ count }] = await devDb.query<{ count: string }[]>(
+        'SELECT count(*) FROM users WHERE email = $1',
+        [email],
+      );
+      return Number(count);
+    };
+    const email = 'isolation-marker@test.dev';
+    const before = await countDevUsersByEmail(email);
 
-    await testDb.query(
-      `INSERT INTO users (email, password) VALUES ('isolation@test.dev', 'x')`,
-    );
+    await testDb.query(`INSERT INTO users (email, password) VALUES ($1, 'x')`, [
+      email,
+    ]);
 
-    expect(await countDevUsers()).toBe(before);
+    expect(await countDevUsersByEmail(email)).toBe(before);
     await cleanAllTables(testDb);
   });
 

@@ -111,3 +111,25 @@ Decided after the 10 SIs, while reviewing the diff; applied as a separate commit
 - **Worker concurrency default 1 -> 4.** A job reads about 1% of the file and mostly waits on storage; 1 would let the queue back up for no reason.
 - **Decided, no code change:** presigned URL lifetime stays 1 h (ready videos are public anyway; players must re-request the redirect on 403); no per-user total storage quota (product decision, not in the PRD); redirects keep `no-store`; production checklist (real S3 + least-privilege IAM, restrictive bucket CORS, Redis-backed throttler storage for several API instances, retention for videos in `error`) documented in nestjs-project/CLAUDE.md.
 - **Test fragility fixed:** the `openapi-export.integration-spec` hook had a fixed 30 s timeout that the full AppModule boot (DB + MinIO + Redis) exceeded on a loaded machine (24 tests failed together in the full run, passed alone); raised to 120 s.
+
+## Library documentation check (context7)
+
+The PRD requires consulting the official docs through context7 before using a library. The libraries were pinned in `library-refs.md` during plan-resolve; at the end of the implementation the APIs used beyond that file were checked again against context7 (BullMQ 6.5.x, `@aws-sdk/s3-request-presigner`, `@nestjs/bullmq`). Findings:
+
+- **BullMQ `upsertJobScheduler(schedulerId, repeatOptions, template)`:** matches `VideoMaintenanceScheduler` (`{ every }` repeat option, `{ name, data }` template). Documented as the replacement of legacy repeatable jobs (v5 -> v6 migration guide), which is why a scheduler is used instead of `setInterval`.
+- **`@aws-sdk/s3-request-presigner` `signableHeaders`:** documented for headers that are not `x-amz-*` (the docs example uses `content-type`); `content-length` follows the same rule and was additionally proven against MinIO (exact size accepted, +1 byte and 64 MiB rejected with 403).
+- **`@nestjs/bullmq` `WorkerHost` / `@OnWorkerEvent('failed')` / `registerQueueAsync` with `defaultJobOptions`:** match the code. The documented `worker` getter is available only after module registration and the docs example reads it in `onApplicationBootstrap`, which is where `VideoProcessingProcessor` applies `VIDEO_WORKER_CONCURRENCY`.
+- No discrepancy between the documentation and the installed versions was found.
+
+## Delivery validation on a clean clone
+
+Done at the end, repeating what an evaluator would do: `git clone` of the fork (branch `dev`), no `.env`, `docker compose up -d`, `cp .env.example .env`, `npm install` in the container.
+
+- **Found and fixed (they blocked the delivery):** (1) `cp .env.example .env` made every `docker compose` command fail (`MAIL_FROM` value not quoted); (2) without `.env` the MinIO variables of `compose.yaml` were blank; (3) `video-worker` exited with `nest: not found` (127) before `npm install` and never came back. Fixes in `nestjs-project/.env.example` and `nestjs-project/compose.yaml` (single-quoted `MAIL_FROM`, `${S3_*:-default}` values equal to `.env.example`, `restart: on-failure` on `video-worker`), on branch `bugfix/compose-fresh-clone`.
+- Everything that was found but is outside the scope of the phase (visibility/publication rules for the next phase, quotas, production hardening, technical debt) is recorded, with its origin, in `docs/backlog/phase-03-follow-ups.md`.
+
+## Final verification of the delivered tree
+
+Run in the container on the exact tree merged to `main` (after the clean-clone fixes and the closing docs): `npx tsc --noEmit` exit 0; `npm run lint` exit 0; `npm test` (serial) 42 suites / 307 tests passed; `npm run test:e2e` (serial) 6 suites / 94 tests passed; `npm run build` exit 0; `docker compose config` valid with the `.env` copied from `.env.example`.
+
+One more defect of the phase's own tests was found by that last run and fixed: `src/test/test-isolation.integration-spec.ts` counted rows in the development database `users` table, which does not exist when that database has not been migrated (fresh clone, or a recreated `db` container: the `db` service has no volume). It now looks for a marker row only when the table exists, and passes with the development database empty and migrated.

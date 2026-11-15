@@ -34,6 +34,8 @@ docker compose exec nestjs-api npm install
 docker compose exec nestjs-api npm run start:dev
 ```
 
+**Fresh clone** (validated on a clean clone of the fork): `cd nestjs-project && cp .env.example .env && docker compose up -d && docker compose exec nestjs-api npm install && docker compose exec nestjs-api npm run migration:run`. Until `npm install` finishes there is no `node_modules`, so `video-worker` exits and Compose restarts it (`restart: on-failure`) until it can start; its first compilation then takes a few minutes. The MinIO credentials in `compose.yaml` default to the values of `.env.example`, so the stack also starts before `.env` exists.
+
 Services:
 - `nestjs-api` — NestJS API, port `3000`
 - `db` — PostgreSQL 17, port `5432`, database `streamtube`, user/password `streamtube`
@@ -215,7 +217,7 @@ Plan, decisions and per-step progress: `docs/phases/phase-03-videos/` and `docs/
 - *Authorization* lives in services (`VideosService.findOwnedByPublicId`, `findReadyByPublicId`): non-owners and not-`ready` videos on public routes get the same `404` as unknown ids.
 - *Redirects* use `Cache-Control: no-store`; the presigned URL is the only capability handed out, and it never names the internal uuid.
 
-**Before production:** use real S3 (the pinned MinIO image is development only) with an IAM user limited to the bucket (`PutObject`, `GetObject`, `DeleteObject`, `AbortMultipartUpload`, `ListMultipartUploadParts`, `ListBucket`) instead of the MinIO root user used in Compose; pre-create the bucket and set its CORS to the frontend origin only (methods `PUT`/`GET`/`HEAD`, expose `ETag` and `Content-Range`); store the `ThrottlerGuard` counters in Redis when running more than one API instance; videos in `error` keep their source object (there is no reprocess endpoint yet), so add a retention rule.
+**Not implemented (tracked, not behavior of the current code):** production hardening (real S3 with least-privilege credentials, bucket CORS, Redis-backed rate limiting, retention for videos in `error`) and the requirements the next phases inherit (video visibility, quotas) are listed in `docs/backlog/phase-03-follow-ups.md`. In Compose the application uses the MinIO root user and the default CORS: development only.
 
 **Rate limits:** the global `ThrottlerGuard` allows 10 requests/minute, which would break a 10 GiB upload (~160 `part-urls` calls), so `part-urls` has an explicit `@Throttle` of 300/min, status 60/min and stream/download/thumbnail 120/min.
 
