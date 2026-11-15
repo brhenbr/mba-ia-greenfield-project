@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
-**Status:** in_progress
-**SIs:** 9/10 completed
+**Status:** completed
+**SIs:** 10/10 completed
 
 ### SI-03.1 — Instalar dependências, configurar namespaces e subir MinIO e Redis no Compose
 - **Status:** completed
@@ -32,7 +32,7 @@
 
 ### SI-03.4 — Criar o StorageModule e o StorageService (S3)
 - **Status:** completed
-- **Tests:** 26 passing (storage.service.spec 15, storage.service.integration-spec 9 against real MinIO, storage.module.spec 1... see file counts); tsc 0; lint 0
+- **Tests:** 26 passing (storage.service.spec 16, storage.service.integration-spec 9 against real MinIO, storage.module.spec 1); tsc 0; lint 0
 - **Observations:**
   - StorageService.ensureBucket runs in onModuleInit, which is also what creates the test bucket streamtube-test.
   - headObject returns null on 404 and ensureBucket/abort swallow only the specific not-found cases (intentional conversions, per service error rule); every other SDK failure is logged server-side and becomes StorageUnavailableException without leaking SDK text.
@@ -49,7 +49,7 @@
 
 ### SI-03.6 — Implementar o fluxo de upload: rascunho, URLs de partes e conclusão
 - **Status:** completed
-- **Tests:** unit 21 (public-id.util 3, video-uploads.service 18), integration 10 (videos.service 9, video-uploads.service 1: DB+MinIO+Redis), e2e 14 (videos-upload.e2e-spec); full suite 223 unit/integration + 66 e2e; tsc 0; lint 0
+- **Tests:** 30 new unit/integration (public-id.util.spec 3, video-uploads.service.spec 17, videos.service.integration-spec 9, video-uploads.service.integration-spec 1 with DB+MinIO+Redis) + 14 e2e (videos-upload.e2e-spec); full suite 223 unit/integration + 66 e2e at that point; tsc 0; lint 0
 - **Observations:**
   - Part size and partCount come from VIDEO_PART_SIZE_BYTES at request time (not stored per video): changing that setting while uploads are in flight would change partCount.
   - markProcessing is one conditional UPDATE (WHERE status='draft') instead of an explicit transaction: atomic and race-safe (test: of two concurrent calls exactly one wins).
@@ -90,7 +90,13 @@
   - Draft cleanup is conditional on status draft in the DELETE, so a video completed while the sweep runs is never removed; a draft whose abort fails is kept and retried next sweep.
 
 ### SI-03.10 — Exportar o OpenAPI, atualizar o CLAUDE.md, medir o upload de 10 GiB e fechar a Definition of Done
-- **Status:** pending
-- **Tests:** pending
-- **Observations:** none
-
+- **Status:** completed
+- **Tests:** 15 new in openapi-export.integration-spec (24 total in file); manual 10 GiB upload passed; final DoD green (see observations)
+- **Observations:**
+  - openapi.json regenerated with `npm run openapi:export`: the 7 video paths are documented (POST /videos, part-urls, complete, GET status, stream, download, thumbnail). openapi-export.integration-spec gained 15 tests (24 total): the 7 paths/methods, access-token security on the 4 protected routes, public + 302 on the 3 delivery routes, and a drift guard that fails when the export differs from the committed openapi.json.
+  - Both CLAUDE.md files updated (nestjs-project/CLAUDE.md: services, FFmpeg 7.1, commands, isolated test resources, jest config, env variables and the S3_PUBLIC_ENDPOINT localhost exception, video module/lifecycle/routes/rate limits, smoke script; root CLAUDE.md: architecture bullets, Docker networking exception). Every file path and npm script they cite was checked to exist. The ESLint line in nestjs-project/CLAUDE.md now matches eslint.config.mjs (no-unsafe-* off in test files only).
+  - scripts/smoke-upload.sh (host, curl only): draft -> part URLs in batches -> direct PUT of each part -> complete -> poll status; reports duration, parts, final status and GET / health during the run. Added REFRESH_TOKEN support (renews the token pair every 10 min) because the access token lasts 15 min and a 10 GiB upload can outlast it.
+  - MANUAL 10 GiB TEST (dev stack: API `npm run start:dev`, compose video-worker, MinIO, Redis): valid video of 10,733,708,537 bytes (9.997 GiB, rawvideo uyvy422 in a .mov, 582.3 s) -> POST /videos 201 with 160 parts of 64 MiB; upload of all parts 451 s; complete 202; status went processing -> ready on the next poll (worker extracted duration 582.333 s and metadata, thumbnail created); GET / answered 200 in 85/85 probes taken every 5 s during the run. Afterwards GET /videos/:id/stream with Range bytes=5368709120-5368709219 answered 206 with Content-Range .../10733708537 and the thumbnail redirect served a JPEG. Network counters: MinIO received 21.6 GB over the two runs while nestjs-api received about 5 MB in total, i.e. no video bytes passed through the API.
+  - The first 10 GiB attempt used a malformed test file (rawvideo yuv420p muxed in .mov: ffprobe itself prints "Invalid pixel format"). The upload part was fine (507 s, 160 parts, complete 202, GET / 97/97 ok) and the worker behaved correctly: PROBE_FAILED was retried 3 times and the video ended in error with failure_reason PROBE_FAILED. Re-generated the file with uyvy422 and re-ran as above. Test videos/objects were deleted from the dev DB and bucket afterwards.
+  - Definition of Done, run in the container on the final tree: `npx tsc --noEmit` exit 0; `npm run lint` exit 0; `npm test` (serial) 42 suites / 300 tests passed; `npm run test:e2e` (serial) 6 suites / 92 tests passed (videos-upload 14, videos-delivery 22, video-processing 4, plus the existing auth/app/swagger suites); `npm run build` exit 0.
+  - Out of scope, noted for separate tasks: (1) `.env.example` has MAIL_FROM unquoted, which breaks Docker Compose parsing on a fresh clone; (2) `channels.service.ts` still has its own private copy of the pg unique-violation helper that now also exists in src/common/database/pg-errors.ts; (3) request DTO schemas in openapi.json are empty (`properties: {}`) because `npm run openapi:export` runs through ts-node without the Swagger CLI plugin (pre-existing from phase 02; response DTOs are complete because they use explicit @ApiProperty); (4) MinIO upstream is archived and the pinned image is unpatched: dev only, SeaweedFS is the documented fallback; (5) the worker uses `nest start --watch`, which does not see host edits on Windows bind mounts (restart the service).

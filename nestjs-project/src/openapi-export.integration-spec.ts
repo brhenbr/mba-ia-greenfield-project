@@ -128,4 +128,57 @@ describe('exportSpec (integration)', () => {
       }
     }
   });
+
+  describe('video endpoints', () => {
+    type Operations = Record<string, Record<string, unknown>>;
+    const paths = () => document.paths as Record<string, Operations>;
+
+    it.each([
+      ['/videos', 'post'],
+      ['/videos/{publicId}/upload/part-urls', 'post'],
+      ['/videos/{publicId}/upload/complete', 'post'],
+      ['/videos/{publicId}', 'get'],
+      ['/videos/{publicId}/stream', 'get'],
+      ['/videos/{publicId}/download', 'get'],
+      ['/videos/{publicId}/thumbnail', 'get'],
+    ])('documents %s (%s)', (path, method) => {
+      const operation = paths()[path]?.[method];
+
+      expect(operation).toBeDefined();
+      expect(typeof operation.summary).toBe('string');
+    });
+
+    it.each([
+      ['/videos', 'post'],
+      ['/videos/{publicId}/upload/part-urls', 'post'],
+      ['/videos/{publicId}/upload/complete', 'post'],
+      ['/videos/{publicId}', 'get'],
+    ])('requires the access token on %s (%s)', (path, method) => {
+      const security = paths()[path][method].security as Array<
+        Record<string, unknown>
+      >;
+
+      expect(security.some((req) => 'access-token' in req)).toBe(true);
+    });
+
+    it.each(['stream', 'download', 'thumbnail'])(
+      'leaves %s public and documents its 302 redirect',
+      (route) => {
+        const operation = paths()[`/videos/{publicId}/${route}`].get;
+        const responses = operation.responses as Record<string, unknown>;
+
+        expect(operation.security).toBeUndefined();
+        expect(responses).toHaveProperty('302');
+        expect(responses).toHaveProperty('404');
+      },
+    );
+  });
+
+  it('matches the committed openapi.json (run `npm run openapi:export` after changing an endpoint)', () => {
+    const committed = JSON.parse(
+      readFileSync(join(process.cwd(), 'openapi.json'), 'utf-8'),
+    ) as Record<string, unknown>;
+
+    expect(document).toEqual(committed);
+  });
 });
