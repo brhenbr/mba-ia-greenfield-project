@@ -4,7 +4,8 @@ import { ConfigType } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { Test } from '@nestjs/testing';
 import { ThrottlerStorage, ThrottlerStorageService } from '@nestjs/throttler';
-import { S3Client } from '@aws-sdk/client-s3';
+import { S3Client, UploadPartCommand } from '@aws-sdk/client-s3';
+import { randomUUID } from 'crypto';
 import { Queue } from 'bullmq';
 import request from 'supertest';
 import { App } from 'supertest/types';
@@ -176,6 +177,26 @@ describe('Videos upload (e2e)', () => {
       expect(row.channel.user.email).toBe('owner@test.dev');
     });
 
+    it('should answer 429 TOO_MANY_OPEN_UPLOADS when the channel reached the unfinished uploads limit', async () => {
+      const channel = await dataSource
+        .getRepository(Channel)
+        .findOneByOrFail({ nickname: 'owner' });
+      for (let i = 0; i < 20; i++) {
+        const id = randomUUID();
+        await dataSource.getRepository(Video).insert({
+          id,
+          public_id: `cap${String(i).padStart(8, '0')}`,
+          channel_id: channel.id,
+          source_key: `videos/${id}/source.mp4`,
+        });
+      }
+
+      const { body } = await createVideo(1024).expect(429);
+
+      expect(body.error).toBe('TOO_MANY_OPEN_UPLOADS');
+      expect(await dataSource.getRepository(Video).count()).toBe(20);
+    });
+
     it('should answer 401 without a token', async () => {
       await request(app.getHttpServer())
         .post('/videos')
@@ -210,6 +231,22 @@ describe('Videos upload (e2e)', () => {
       const parts = await uploadParts(created.publicId, [PART_SIZE, 1024]);
 
       expect(parts.every((p) => p.etag.length > 0)).toBe(true);
+    });
+
+    it('should return the exact size of each part and let storage reject any other size', async () => {
+      const { body: created } = await createVideo(PART_SIZE + 1024);
+      const { body } = await requestPartUrls(created.publicId, [1, 2]).expect(
+        200,
+      );
+
+      expect(body.parts.map((p: { sizeBytes: number }) => p.sizeBytes)).toEqual(
+        [PART_SIZE, 1024],
+      );
+      const oversized = await fetch(body.parts[1].url as string, {
+        method: 'PUT',
+        body: Buffer.alloc(1025, 3),
+      });
+      expect(oversized.status).toBe(403);
     });
 
     it('should answer 404 VIDEO_NOT_FOUND to another user', async () => {
@@ -294,8 +331,23 @@ describe('Videos upload (e2e)', () => {
     });
 
     it('should answer 422 UPLOAD_SIZE_MISMATCH when the stored total differs from the declared size', async () => {
+      // Signed URLs make this impossible through the API, so the second part is
+      // written straight to storage with the SDK (a bypass of the size guard).
       const { body: created } = await createVideo(PART_SIZE + 1024);
-      const parts = await uploadParts(created.publicId, [PART_SIZE, 2048]);
+      const [first] = await uploadParts(created.publicId, [PART_SIZE]);
+      const row = await dataSource
+        .getRepository(Video)
+        .findOneByOrFail({ public_id: created.publicId });
+      const second = await s3.send(
+        new UploadPartCommand({
+          Bucket: storageCfg.bucket,
+          Key: row.source_key,
+          UploadId: row.upload_id as string,
+          PartNumber: 2,
+          Body: Buffer.alloc(2048, 3),
+        }),
+      );
+      const parts = [first, { partNumber: 2, etag: second.ETag as string }];
 
       const { body } = await completeUpload(created.publicId, parts).expect(
         422,

@@ -109,8 +109,9 @@ while [ "$part" -le "$PART_COUNT" ]; do
   [ "$STATUS" = "200" ] || die "part-urls answered $STATUS: $BODY"
 
   for n in $(seq "$part" "$last"); do
-    # The URL of part n is the one that follows {"partNumber":n,"url":"
-    url=$(sed -n "s/.*{\"partNumber\":$n,\"url\":\"\([^\"]*\)\".*/\1/p" <<<"$BODY" | head -1)
+    # Part n looks like {"partNumber":n,"sizeBytes":N,"url":"..."}. The URL is signed for
+    # exactly N bytes (Content-Length), which is what `dd` + `curl -T` send below.
+    url=$(sed -n "s/.*{\"partNumber\":$n,\"sizeBytes\":[0-9]*,\"url\":\"\([^\"]*\)\".*/\1/p" <<<"$BODY" | head -1)
     [ -n "$url" ] || die "no URL returned for part $n"
     # Extract the part to a file so curl sends a Content-Length (S3 rejects chunked PUTs).
     dd if="$FILE" of="$WORK/part" bs="$PART_SIZE" skip=$((n - 1)) count=1 2>/dev/null

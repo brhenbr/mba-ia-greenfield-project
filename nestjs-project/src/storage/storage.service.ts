@@ -101,11 +101,17 @@ export class StorageService implements OnModuleInit {
     });
   }
 
-  /** Signed for the public endpoint: the client PUTs the part straight to storage. */
+  /**
+   * Signed for the public endpoint: the client PUTs the part straight to
+   * storage. The exact `Content-Length` is part of the signature, so storage
+   * rejects (403) a part of any other size: a client cannot push oversized
+   * parts through a URL issued for a smaller one.
+   */
   async presignUploadPart(
     key: string,
     uploadId: string,
     partNumber: number,
+    contentLength: number,
   ): Promise<string> {
     return this.guard('presignUploadPart', () =>
       getSignedUrl(
@@ -115,8 +121,12 @@ export class StorageService implements OnModuleInit {
           Key: key,
           UploadId: uploadId,
           PartNumber: partNumber,
+          ContentLength: contentLength,
         }),
-        { expiresIn: this.config.presignExpiresSeconds },
+        {
+          expiresIn: this.config.presignExpiresSeconds,
+          signableHeaders: new Set(['content-length']),
+        },
       ),
     );
   }

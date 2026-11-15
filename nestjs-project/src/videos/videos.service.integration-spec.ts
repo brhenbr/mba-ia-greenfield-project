@@ -142,6 +142,22 @@ describe('VideosService (integration)', () => {
     });
   });
 
+  describe('countOpenDrafts', () => {
+    it('should count only the unfinished uploads of that channel', async () => {
+      await service.createDraft(draftInput(owner.channel.id));
+      await service.createDraft(draftInput(owner.channel.id));
+      const processing = await service.createDraft(
+        draftInput(owner.channel.id),
+      );
+      await service.markProcessing(processing.id);
+      const other = await createOwner('other-drafts@test.dev', 'otherdrafts');
+      await service.createDraft(draftInput(other.channel.id));
+
+      await expect(service.countOpenDrafts(owner.channel.id)).resolves.toBe(2);
+      await expect(service.countOpenDrafts(other.channel.id)).resolves.toBe(1);
+    });
+  });
+
   describe('markProcessing', () => {
     it('should move a draft to processing, stamp the start time and clear the upload id', async () => {
       const video = await service.createDraft(draftInput(owner.channel.id));

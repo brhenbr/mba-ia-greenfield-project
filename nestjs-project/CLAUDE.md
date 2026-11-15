@@ -174,7 +174,9 @@ Defined and validated (Joi) in `src/config/env.validation.ts`, read by `src/conf
 | `S3_PRESIGN_EXPIRES_SECONDS` | Lifetime of presigned URLs (default `3600`) |
 | `REDIS_HOST`, `REDIS_PORT`, `QUEUE_PREFIX` | BullMQ connection (`redis`, `6379`) and the key prefix |
 | `VIDEO_PART_SIZE_BYTES` | Multipart part size (default 64 MiB, minimum 5 MiB) |
-| `VIDEO_WORKER_CONCURRENCY`, `VIDEO_SWEEP_INTERVAL_MS`, `VIDEO_PROCESSING_STUCK_MINUTES`, `VIDEO_DRAFT_TTL_DAYS` | Worker concurrency and the maintenance sweep |
+| `VIDEO_WORKER_CONCURRENCY` | Jobs the worker runs in parallel (default 4: a job mostly waits on storage reads, it reads ~1% of the file) |
+| `VIDEO_MAX_OPEN_DRAFTS` | Unfinished uploads (drafts) allowed per channel (default 20); the next `POST /videos` answers `429 TOO_MANY_OPEN_UPLOADS` |
+| `VIDEO_SWEEP_INTERVAL_MS`, `VIDEO_PROCESSING_STUCK_MINUTES`, `VIDEO_DRAFT_TTL_DAYS` | The maintenance sweep (interval, "stuck in processing" threshold, abandoned-draft age) |
 
 **The only permitted `localhost`:** `S3_PUBLIC_ENDPOINT=http://localhost:9000`. A presigned URL is consumed by the client (browser, `curl` on the host) **outside** the Docker network and its signature binds the `Host` header, so it must name an address the client can reach. Every other host (`db`, `redis`, `minio`, `S3_ENDPOINT`) stays a Compose service name.
 
@@ -204,6 +206,16 @@ Plan, decisions and per-step progress: `docs/phases/phase-03-videos/` and `docs/
 **Lifecycle:** `draft → processing → ready | error` (`ready` and `error` are final). `POST /videos` creates the draft and the multipart upload; `part-urls` signs part URLs; `complete` re-checks the parts and sizes against storage (`ListParts`), moves the video to `processing` and **only after that commit** enqueues the job. The worker reads the source through an internal presigned URL, extracts duration/metadata with `ffprobe`, renders a JPEG thumbnail, and finalises with conditional updates (`WHERE status = 'processing'`), so redelivered jobs change nothing. A file that is not a video ends as `error` with `failure_reason = NOT_A_VIDEO` without retries. The maintenance sweep (a BullMQ job scheduler, every `VIDEO_SWEEP_INTERVAL_MS`) re-enqueues videos stuck in `processing` and aborts + deletes abandoned drafts.
 
 **Routes** (`@Controller('videos')`; the exported contract is `openapi.json`): `POST /videos`, `POST /videos/:publicId/upload/part-urls`, `POST /videos/:publicId/upload/complete`, `GET /videos/:publicId` (owner only), and the public `GET /videos/:publicId/stream`, `/download`, `/thumbnail` (302 redirect to a presigned URL, `Cache-Control: no-store`, only for `ready` videos). `publicId` is an 11-character random id; the internal uuid is never exposed. Anyone but the owner, and any non-`ready` video on public routes, gets `404 VIDEO_NOT_FOUND`.
+
+**Part URLs are signed for an exact size.** `part-urls` returns `{ partNumber, sizeBytes, url }` per part and signs `Content-Length = sizeBytes` into the URL: every part has `partSizeBytes` except the last (the remainder). Storage answers `403` to a `PUT` of any other size, so a client cannot push oversized parts through an issued URL. Clients must send exactly that many bytes (a browser `fetch`/`XHR` with a `Blob` sets `Content-Length` itself; `scripts/smoke-upload.sh` does it with `curl -T`). Part and stream/download URLs last `S3_PRESIGN_EXPIRES_SECONDS` (1 h): a client that uploads slowly must ask for part URLs in small batches, and a player must request the `stream` redirect again if storage answers `403` (expired URL).
+
+**Security decisions:**
+- *Untrusted media.* `MediaProbeService` runs `ffprobe`/`ffmpeg` with `-format_whitelist` (only the mp4/mov/matroska/webm demuxers) and `-protocol_whitelist http,https,tcp,tls`, argument arrays (no shell), timeouts and an output cap; a format outside the list ends as `NOT_A_VIDEO`.
+- *Storage abuse.* Exact signed part sizes, `VIDEO_MAX_OPEN_DRAFTS` per channel, and the sweep that aborts drafts older than `VIDEO_DRAFT_TTL_DAYS`. There is **no per-user total storage quota** (a product decision not in the PRD): define one with the video management phase.
+- *Authorization* lives in services (`VideosService.findOwnedByPublicId`, `findReadyByPublicId`): non-owners and not-`ready` videos on public routes get the same `404` as unknown ids.
+- *Redirects* use `Cache-Control: no-store`; the presigned URL is the only capability handed out, and it never names the internal uuid.
+
+**Before production:** use real S3 (the pinned MinIO image is development only) with an IAM user limited to the bucket (`PutObject`, `GetObject`, `DeleteObject`, `AbortMultipartUpload`, `ListMultipartUploadParts`, `ListBucket`) instead of the MinIO root user used in Compose; pre-create the bucket and set its CORS to the frontend origin only (methods `PUT`/`GET`/`HEAD`, expose `ETag` and `Content-Range`); store the `ThrottlerGuard` counters in Redis when running more than one API instance; videos in `error` keep their source object (there is no reprocess endpoint yet), so add a retention rule.
 
 **Rate limits:** the global `ThrottlerGuard` allows 10 requests/minute, which would break a 10 GiB upload (~160 `part-urls` calls), so `part-urls` has an explicit `@Throttle` of 300/min, status 60/min and stream/download/thumbnail 120/min.
 

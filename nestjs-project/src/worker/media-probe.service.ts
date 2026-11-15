@@ -27,6 +27,17 @@ const MAX_STDERR_CHARS = 4_000;
 // Containers the plan allows (mp4/mov share a demuxer; webm is matroska).
 const ALLOWED_CONTAINERS = ['mov', 'mp4', 'matroska', 'webm'];
 
+// Defense in depth for parsing files uploaded by users. FFmpeg can follow
+// references inside some formats (playlists, concat lists, ...): only the
+// demuxers of the allowed containers may be used, and the only protocols are
+// HTTP(S) (the presigned URL). A format outside the list is refused up front.
+const INPUT_GUARDS = [
+  '-format_whitelist',
+  'mov,mp4,m4a,3gp,3g2,mj2,matroska,webm',
+  '-protocol_whitelist',
+  'http,https,tcp,tls',
+];
+
 interface RawStream {
   codec_type?: string;
   codec_name?: string;
@@ -170,6 +181,7 @@ export class MediaProbeService {
         [
           '-v',
           'error',
+          ...INPUT_GUARDS,
           '-print_format',
           'json',
           '-show_format',
@@ -181,8 +193,12 @@ export class MediaProbeService {
     );
 
     if (result.code !== 0) {
-      // ffprobe says this when it does not recognise the bytes as media.
-      if (result.stderr.includes('Invalid data found when processing input')) {
+      // ffprobe says this when it does not recognise the bytes as media, or
+      // recognises a format that is not on the demuxer allowlist.
+      if (
+        result.stderr.includes('Invalid data found when processing input') ||
+        result.stderr.includes('Format not on whitelist')
+      ) {
         throw new MediaProbeError('NOT_A_VIDEO', 'unrecognised media data');
       }
       throw new MediaProbeError(
@@ -201,6 +217,7 @@ export class MediaProbeService {
         [
           '-v',
           'error',
+          ...INPUT_GUARDS,
           '-ss',
           String(seconds),
           '-i',

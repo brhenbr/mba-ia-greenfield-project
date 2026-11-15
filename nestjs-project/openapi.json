@@ -495,6 +495,16 @@
               }
             }
           },
+          "429": {
+            "description": "TOO_MANY_OPEN_UPLOADS (the channel already has the maximum of unfinished uploads) or the request rate limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
           "503": {
             "description": "STORAGE_UNAVAILABLE: the multipart upload could not be created",
             "content": {
@@ -1025,6 +1035,11 @@
             "type": "number",
             "example": 1
           },
+          "sizeBytes": {
+            "type": "number",
+            "example": 67108864,
+            "description": "Exact size of this part in bytes. The URL is signed for this Content-Length: storage rejects any other size"
+          },
           "url": {
             "type": "string",
             "description": "Presigned URL: PUT the part bytes straight to it"
@@ -1032,6 +1047,7 @@
         },
         "required": [
           "partNumber",
+          "sizeBytes",
           "url"
         ]
       },

@@ -148,6 +148,14 @@ export class VideosService {
     return this.videoRepository.findOneBy({ id: videoId });
   }
 
+  /** Unfinished uploads of a channel (each one holds a multipart upload in storage). */
+  async countOpenDrafts(channelId: string): Promise<number> {
+    return this.videoRepository.countBy({
+      channel_id: channelId,
+      status: VideoStatus.DRAFT,
+    });
+  }
+
   /**
    * `processing → ready`, written by the worker. Conditional on `processing`,
    * so a duplicate delivery matches no row and changes nothing (not even

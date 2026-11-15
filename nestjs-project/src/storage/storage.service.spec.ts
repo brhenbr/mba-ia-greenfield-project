@@ -50,9 +50,15 @@ describe('StorageService', () => {
 
   describe('presigned URLs', () => {
     it('should sign part URLs for the public endpoint host', async () => {
-      const url = new URL(await service.presignUploadPart('k', 'upload-1', 2));
+      const url = new URL(
+        await service.presignUploadPart('k', 'upload-1', 2, 1234),
+      );
 
       expect(url.host).toBe('public.example.test:9000');
+      // The exact size is part of the signature: storage rejects any other.
+      expect(url.searchParams.get('X-Amz-SignedHeaders')).toContain(
+        'content-length',
+      );
       expect(url.searchParams.get('partNumber')).toBe('2');
       expect(url.searchParams.get('uploadId')).toBe('upload-1');
     });

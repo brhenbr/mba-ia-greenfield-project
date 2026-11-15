@@ -3,6 +3,7 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import type { ConfigType } from '@nestjs/config';
 import {
   InvalidPartNumberException,
+  TooManyOpenUploadsException,
   UploadPartsMismatchException,
   UploadSizeMismatchException,
   VideoInvalidStateException,
@@ -58,6 +59,12 @@ export class VideoUploadsService {
     const channel = await this.channelsService.findByUserId(userId);
     if (!channel) {
       throw new VideoNotFoundException();
+    }
+    // Bounds the storage a single account can reserve with unfinished uploads
+    // (abandoned drafts are only reclaimed by the sweep after VIDEO_DRAFT_TTL_DAYS).
+    const openDrafts = await this.videosService.countOpenDrafts(channel.id);
+    if (openDrafts >= this.videosCfg.maxOpenDrafts) {
+      throw new TooManyOpenUploadsException();
     }
 
     // The id is generated here (not by the DB) because the storage key embeds it.
@@ -117,14 +124,19 @@ export class VideoUploadsService {
     }
 
     const parts = await Promise.all(
-      partNumbers.map(async (partNumber) => ({
-        partNumber,
-        url: await this.storageService.presignUploadPart(
-          video.source_key,
-          video.upload_id as string,
+      partNumbers.map(async (partNumber) => {
+        const sizeBytes = this.partLengthOf(video, partNumber, partCount);
+        return {
           partNumber,
-        ),
-      })),
+          sizeBytes,
+          url: await this.storageService.presignUploadPart(
+            video.source_key,
+            video.upload_id as string,
+            partNumber,
+            sizeBytes,
+          ),
+        };
+      }),
     );
     return { parts, expiresInSeconds: this.storageCfg.presignExpiresSeconds };
   }
@@ -207,5 +219,17 @@ export class VideoUploadsService {
     return Math.ceil(
       (video.size_bytes as number) / this.videosCfg.partSizeBytes,
     );
+  }
+
+  /** Every part has `partSizeBytes` except the last, which carries the remainder. */
+  private partLengthOf(
+    video: Video,
+    partNumber: number,
+    partCount: number,
+  ): number {
+    return partNumber < partCount
+      ? this.videosCfg.partSizeBytes
+      : (video.size_bytes as number) -
+          (partCount - 1) * this.videosCfg.partSizeBytes;
   }
 }

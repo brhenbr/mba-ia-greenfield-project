@@ -1,5 +1,6 @@
 import {
   InvalidPartNumberException,
+  TooManyOpenUploadsException,
   UploadPartsMismatchException,
   UploadSizeMismatchException,
   VideoInvalidStateException,
@@ -16,6 +17,7 @@ const PART_SIZE = 5 * MIB;
 describe('VideoUploadsService', () => {
   let service: VideoUploadsService;
   const videosService = {
+    countOpenDrafts: jest.fn(),
     createDraft: jest.fn(),
     findOwnedByPublicId: jest.fn(),
     markProcessing: jest.fn(),
@@ -57,10 +59,11 @@ describe('VideoUploadsService', () => {
       channelsService as never,
       storageService as never,
       videoQueueService as never,
-      { partSizeBytes: PART_SIZE } as never,
+      { partSizeBytes: PART_SIZE, maxOpenDrafts: 20 } as never,
       { presignExpiresSeconds: 3600 } as never,
     );
     videosService.findOwnedByPublicId.mockResolvedValue(draft());
+    videosService.countOpenDrafts.mockResolvedValue(0);
     storageService.listParts.mockResolvedValue(storedParts);
     storageService.abortMultipartUpload.mockResolvedValue(undefined);
     videoQueueService.enqueueProcessing.mockResolvedValue(undefined);
@@ -96,6 +99,34 @@ describe('VideoUploadsService', () => {
       });
 
       expect(result.partCount).toBe(2048); // 10 GiB / 5 MiB in this config
+    });
+
+    it('should refuse a new upload when the channel already has the maximum of open drafts', async () => {
+      channelsService.findByUserId.mockResolvedValue({ id: 'channel-1' });
+      videosService.countOpenDrafts.mockResolvedValue(20);
+
+      await expect(service.startUpload('user-1', dto)).rejects.toBeInstanceOf(
+        TooManyOpenUploadsException,
+      );
+
+      expect(videosService.countOpenDrafts).toHaveBeenCalledWith('channel-1');
+      expect(storageService.createMultipartUpload).not.toHaveBeenCalled();
+    });
+
+    it('should allow an upload while below the open drafts limit', async () => {
+      channelsService.findByUserId.mockResolvedValue({ id: 'channel-1' });
+      videosService.countOpenDrafts.mockResolvedValue(19);
+      storageService.createMultipartUpload.mockResolvedValue('upload-1');
+      videosService.createDraft.mockImplementation((input: object) => ({
+        ...input,
+        public_id: 'abcdefghijk',
+        status: VideoStatus.DRAFT,
+        size_bytes: dto.sizeBytes,
+      }));
+
+      await expect(service.startUpload('user-1', dto)).resolves.toMatchObject({
+        publicId: 'abcdefghijk',
+      });
     });
 
     it('should fail when the user has no channel', async () => {
@@ -165,19 +196,40 @@ describe('VideoUploadsService', () => {
 
     it('should return one signed URL per requested part', async () => {
       storageService.presignUploadPart.mockImplementation(
-        (_key: string, _uploadId: string, n: number) =>
-          Promise.resolve(`https://storage/part/${n}`),
+        (_key: string, _uploadId: string, n: number, length: number) =>
+          Promise.resolve(`https://storage/part/${n}?len=${length}`),
       );
 
       const result = await service.getPartUrls('user-1', 'abcdefghijk', [2, 1]);
 
       expect(result).toEqual({
         parts: [
-          { partNumber: 2, url: 'https://storage/part/2' },
-          { partNumber: 1, url: 'https://storage/part/1' },
+          {
+            partNumber: 2,
+            sizeBytes: MIB,
+            url: `https://storage/part/2?len=${MIB}`,
+          },
+          {
+            partNumber: 1,
+            sizeBytes: PART_SIZE,
+            url: `https://storage/part/1?len=${PART_SIZE}`,
+          },
         ],
         expiresInSeconds: 3600,
       });
+      // Every part but the last has the full part size; the last carries the remainder.
+      expect(storageService.presignUploadPart).toHaveBeenCalledWith(
+        'videos/video-id/source.mp4',
+        'upload-1',
+        1,
+        PART_SIZE,
+      );
+      expect(storageService.presignUploadPart).toHaveBeenCalledWith(
+        'videos/video-id/source.mp4',
+        'upload-1',
+        2,
+        MIB,
+      );
     });
   });
 

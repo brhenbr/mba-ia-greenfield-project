@@ -102,3 +102,13 @@ export class StorageUnavailableException extends DomainException {
     super('STORAGE_UNAVAILABLE', 503, 'Storage service is unavailable');
   }
 }
+
+export class TooManyOpenUploadsException extends DomainException {
+  constructor() {
+    super(
+      'TOO_MANY_OPEN_UPLOADS',
+      429,
+      'Too many unfinished uploads: complete or wait for older ones to expire',
+    );
+  }
+}

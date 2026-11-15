@@ -174,6 +174,10 @@ describe('MediaProbeService', () => {
       expect(args).toEqual([
         '-v',
         'error',
+        '-format_whitelist',
+        'mov,mp4,m4a,3gp,3g2,mj2,matroska,webm',
+        '-protocol_whitelist',
+        'http,https,tcp,tls',
         '-print_format',
         'json',
         '-show_format',
@@ -188,6 +192,19 @@ describe('MediaProbeService', () => {
       spawnMock.mockReturnValue(
         fakeProcess({
           stderr: 'x.txt: Invalid data found when processing input',
+          code: 1,
+        }),
+      );
+
+      await expect(service.probe(url)).rejects.toMatchObject({
+        reason: 'NOT_A_VIDEO',
+      });
+    });
+
+    it('should report a format outside the demuxer allowlist as NOT_A_VIDEO', async () => {
+      spawnMock.mockReturnValue(
+        fakeProcess({
+          stderr: "[hls @ 0x1] Format not on whitelist 'mov,mp4'",
           code: 1,
         }),
       );
@@ -259,6 +276,13 @@ describe('MediaProbeService', () => {
         ]),
       );
       expect(args).toContain("scale='min(1280,iw)':-2");
+      // Input guards must precede -i: they are input options.
+      expect(args.indexOf('-format_whitelist')).toBeLessThan(
+        args.indexOf('-i'),
+      );
+      expect(args.indexOf('-protocol_whitelist')).toBeLessThan(
+        args.indexOf('-i'),
+      );
       expect(options.shell).toBeUndefined();
       expect(result.equals(jpeg)).toBe(true);
     });

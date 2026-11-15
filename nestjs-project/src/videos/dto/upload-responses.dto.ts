@@ -23,6 +23,13 @@ export class PartUrlDto {
   partNumber: number;
 
   @ApiProperty({
+    example: 67108864,
+    description:
+      'Exact size of this part in bytes. The URL is signed for this Content-Length: storage rejects any other size',
+  })
+  sizeBytes: number;
+
+  @ApiProperty({
     description: 'Presigned URL: PUT the part bytes straight to it',
   })
   url: string;

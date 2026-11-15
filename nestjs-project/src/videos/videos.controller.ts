@@ -77,6 +77,12 @@ export class VideosController {
     schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
   })
   @ApiResponse({
+    status: 429,
+    description:
+      'TOO_MANY_OPEN_UPLOADS (the channel already has the maximum of unfinished uploads) or the request rate limit',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  @ApiResponse({
     status: 503,
     description:
       'STORAGE_UNAVAILABLE: the multipart upload could not be created',

@@ -35,7 +35,12 @@ describe('StorageService (integration, real MinIO)', () => {
     const completed: { partNumber: number; etag: string }[] = [];
     for (const [index, size] of sizes.entries()) {
       const partNumber = index + 1;
-      const url = await service.presignUploadPart(key, uploadId, partNumber);
+      const url = await service.presignUploadPart(
+        key,
+        uploadId,
+        partNumber,
+        size,
+      );
       completed.push({ partNumber, etag: await uploadPart(url, size) });
     }
     await service.completeMultipartUpload(key, uploadId, completed);
@@ -73,7 +78,12 @@ describe('StorageService (integration, real MinIO)', () => {
     const sizes = [5 * MIB, 5 * MIB, 1024];
     const completed: { partNumber: number; etag: string }[] = [];
     for (const [index, size] of sizes.entries()) {
-      const url = await service.presignUploadPart(key, uploadId, index + 1);
+      const url = await service.presignUploadPart(
+        key,
+        uploadId,
+        index + 1,
+        size,
+      );
       completed.push({
         partNumber: index + 1,
         etag: await uploadPart(url, size),
@@ -93,11 +103,34 @@ describe('StorageService (integration, real MinIO)', () => {
     const key = `${prefix}${randomUUID()}/host.mp4`;
     const uploadId = await service.createMultipartUpload(key, 'video/mp4');
 
-    const url = new URL(await service.presignUploadPart(key, uploadId, 1));
+    const url = new URL(
+      await service.presignUploadPart(key, uploadId, 1, 5 * MIB),
+    );
 
     expect(url.host).toBe(new URL(config.publicEndpoint).host);
     await service.abortMultipartUpload(key, uploadId);
   });
+
+  it.each([
+    ['one byte larger', 5 * MIB + 1],
+    ['much larger', 64 * MIB],
+    ['smaller', 1024],
+  ])(
+    'should reject a part %s than the size the URL was signed for',
+    async (_label, actualSize) => {
+      const key = `${prefix}${randomUUID()}/size-guard.mp4`;
+      const uploadId = await service.createMultipartUpload(key, 'video/mp4');
+      const url = await service.presignUploadPart(key, uploadId, 1, 5 * MIB);
+
+      const response = await fetch(url, {
+        method: 'PUT',
+        body: Buffer.alloc(actualSize, 1),
+      });
+
+      expect(response.status).toBe(403);
+      await service.abortMultipartUpload(key, uploadId);
+    },
+  );
 
   it('should serve partial content when the signed GET carries a Range header', async () => {
     const key = `${prefix}${randomUUID()}/range.mp4`;
