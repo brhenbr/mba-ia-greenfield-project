@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 8/10 completed
+**SIs:** 9/10 completed
 
 ### SI-03.1 — Instalar dependências, configurar namespaces e subir MinIO e Redis no Compose
 - **Status:** completed
@@ -81,9 +81,13 @@
   - Added VideosService.findReadyByPublicId: anonymous delivery only ever sees ready videos, so draft/processing/error answer exactly like unknown ids (404 VIDEO_NOT_FOUND).
 
 ### SI-03.9 — Implementar a reconciliação e a limpeza de uploads abandonados
-- **Status:** pending
-- **Tests:** pending
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 13 new (video-maintenance.service.integration-spec 8, video-maintenance.processor.spec 4, video-maintenance.scheduler.integration-spec 1); full suite 285 unit/integration + 92 e2e; tsc 0; lint 0
+- **Observations:**
+  - VideoQueueService.requeueProcessing added (not in the plan): jobId = videoId and finished jobs are retained, so a plain re-add for a video whose old job is completed/failed would be silently ignored by BullMQ. It leaves waiting/active/delayed jobs alone and removes retained completed/failed ones before re-adding (tested with a real failed job).
+  - Finding: this MinIO returns an EMPTY list for ListMultipartUploads when a Prefix is given (without Prefix it lists everything). src/test/clean-storage.ts had therefore never aborted leftover multipart uploads, and my first draft-cleanup assertion would have passed vacuously. Now both list without Prefix and filter client-side; the test also asserts the upload exists before cleanup.
+  - The sweep processor runs both routines and, if any failed, throws after both ran so the failure is visible in BullMQ without stopping future scheduled sweeps. Sweeps are bounded to 200 videos per run.
+  - Draft cleanup is conditional on status draft in the DELETE, so a video completed while the sweep runs is never removed; a draft whose abort fails is kept and retried next sweep.
 
 ### SI-03.10 — Exportar o OpenAPI, atualizar o CLAUDE.md, medir o upload de 10 GiB e fechar a Definition of Done
 - **Status:** pending

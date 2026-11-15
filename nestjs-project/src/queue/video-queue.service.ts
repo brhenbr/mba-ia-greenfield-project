@@ -25,4 +25,22 @@ export class VideoQueueService {
       { jobId: videoId },
     );
   }
+
+  /**
+   * Re-enqueues a video whose job may be gone or finished. A job that is still
+   * waiting, active or delayed is left alone (it will be processed); a retained
+   * completed or failed job is removed first, otherwise BullMQ would ignore
+   * the new job because its id already exists.
+   */
+  async requeueProcessing(videoId: string): Promise<void> {
+    const existing = await this.processingQueue.getJob(videoId);
+    if (existing) {
+      const state = await existing.getState();
+      if (state !== 'completed' && state !== 'failed') {
+        return;
+      }
+      await existing.remove();
+    }
+    await this.enqueueProcessing(videoId);
+  }
 }

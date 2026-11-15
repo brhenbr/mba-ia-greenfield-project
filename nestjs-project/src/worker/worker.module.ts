@@ -8,8 +8,11 @@ import { StorageModule } from '../storage/storage.module';
 import { Channel } from '../channels/entities/channel.entity';
 import { User } from '../users/entities/user.entity';
 import { Video } from '../videos/entities/video.entity';
+import { VideoMaintenanceService } from '../videos/video-maintenance.service';
 import { VideosService } from '../videos/videos.service';
 import { MediaProbeService } from './media-probe.service';
+import { VideoMaintenanceProcessor } from './video-maintenance.processor';
+import { VideoMaintenanceScheduler } from './video-maintenance.scheduler';
 import { VideoProcessingProcessor } from './video-processing.processor';
 
 // Root module of the video worker: same codebase as the API, no HTTP server.
@@ -23,6 +26,13 @@ import { VideoProcessingProcessor } from './video-processing.processor';
     StorageModule,
     QueueModule,
   ],
-  providers: [VideosService, MediaProbeService, VideoProcessingProcessor],
+  providers: [
+    VideosService,
+    VideoMaintenanceService,
+    MediaProbeService,
+    VideoProcessingProcessor,
+    VideoMaintenanceProcessor,
+    VideoMaintenanceScheduler,
+  ],
 })
 export class WorkerModule {}

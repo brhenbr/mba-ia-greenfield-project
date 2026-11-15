@@ -35,10 +35,14 @@ export async function cleanStorage(
     token = page.IsTruncated ? page.NextContinuationToken : undefined;
   } while (token);
 
+  // MinIO returns an empty list when ListMultipartUploads is given a Prefix, so
+  // list every upload and filter by prefix on the client.
   const uploads = await client.send(
-    new ListMultipartUploadsCommand({ Bucket: bucket, Prefix: prefix }),
+    new ListMultipartUploadsCommand({ Bucket: bucket }),
   );
-  for (const upload of uploads.Uploads ?? []) {
+  for (const upload of (uploads.Uploads ?? []).filter((u) =>
+    (u.Key ?? '').startsWith(prefix),
+  )) {
     await client.send(
       new AbortMultipartUploadCommand({
         Bucket: bucket,
