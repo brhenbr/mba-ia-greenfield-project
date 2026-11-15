@@ -5,8 +5,12 @@
   "testEnvironment": "node",
   "testRegex": ".e2e-spec.ts$",
   "transform": {
+    "node_modules/@nestjs/(bullmq|bull-shared)/.+\\.js$": "<rootDir>/esm-to-cjs.transformer.js",
     "^.+\\.(t|j)s$": "ts-jest"
   },
+  "transformIgnorePatterns": [
+    "/node_modules/(?!@nestjs/(bullmq|bull-shared)/)"
+  ],
   "setupFiles": ["dotenv/config", "<rootDir>/set-test-env.ts"],
   "globalSetup": "<rootDir>/jest-global-setup.ts"
 }
