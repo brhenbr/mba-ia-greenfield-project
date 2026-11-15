@@ -13,6 +13,9 @@ docker compose ps   # all services must show status "running"
 Then verify each infrastructure service is actually ready to accept connections — not just running:
 
 - **PostgreSQL:** `docker compose exec db pg_isready -U streamtube` — expect `accepting connections`
+- **Redis:** `docker compose exec redis redis-cli ping` — expect `PONG`
+- **MinIO:** `curl http://localhost:9000/minio/health/live` — expect HTTP `200`
+- **Video worker:** `docker compose exec video-worker ffmpeg -version` — expect version 7 or higher; its logs (`docker compose logs video-worker`) show `Video worker is running` once the first compilation ends
 
 Only start the NestJS dev server (`npm run start:dev`) when the user **explicitly** asks to run the application — never as part of "start the environment".
 
@@ -31,9 +34,17 @@ docker compose exec nestjs-api npm install
 docker compose exec nestjs-api npm run start:dev
 ```
 
+**Fresh clone** (validated on a clean clone of the fork): `cd nestjs-project && cp .env.example .env && docker compose up -d && docker compose exec nestjs-api npm install && docker compose exec nestjs-api npm run migration:run`. Until `npm install` finishes there is no `node_modules`, so `video-worker` exits and Compose restarts it (`restart: on-failure`) until it can start; its first compilation then takes a few minutes. The MinIO credentials in `compose.yaml` default to the values of `.env.example`, so the stack also starts before `.env` exists.
+
 Services:
 - `nestjs-api` — NestJS API, port `3000`
 - `db` — PostgreSQL 17, port `5432`, database `streamtube`, user/password `streamtube`
+- `mailpit` — SMTP catcher, SMTP `1025`, web UI `8025`
+- `minio` — S3-compatible object storage, API on `9000` (image `bitnamilegacy/minio`; upstream MinIO is archived, so **development only**). The bucket `S3_BUCKET` is created automatically
+- `redis` — BullMQ broker with AOF persistence (`--appendonly yes`), internal port `6379`
+- `video-worker` — the FFmpeg video worker (same codebase, entry point `src/worker/worker.main.ts`), started with `npm run start:worker`
+
+`nestjs-api` and `video-worker` both ship FFmpeg/ffprobe **7.1** (static binaries copied from `mwader/static-ffmpeg:7.1` in `Dockerfile.dev` and `Dockerfile.worker`; the Debian package is 5.x and is not used). The API never runs FFmpeg at runtime: it is in the API image only so the e2e suite can run the worker in-process.
 
 All verification and teardown commands run on the **host machine**:
 
@@ -63,10 +74,14 @@ npm run start:dev                        # Dev server with hot-reload
 npm run build                            # Compile to dist/
 npm run start:prod                       # Run compiled build
 
-npm test                                 # Unit tests
+npm run start:worker                     # Video worker (the `video-worker` service runs this)
+
+npm test                                 # Unit + integration tests (serial: --runInBand)
 npm run test:watch                       # Unit tests in watch mode
 npm run test:cov                         # Coverage report
-npm run test:e2e                         # End-to-end tests (always with --runInBand)
+npm run test:e2e                         # End-to-end tests (serial: --runInBand)
+
+npm run openapi:export                   # Regenerate openapi.json (a test fails if it is stale)
 
 npx tsc --noEmit                         # Type-check (required before declaring a task done)
 npm run lint                             # ESLint with auto-fix
@@ -93,13 +108,21 @@ docker compose exec nestjs-api npm run test:e2e   # already configured
 
 Parallel execution causes FK violations, deadlocks, and cross-suite contamination because suites truncate or seed shared tables concurrently.
 
+**Isolated test resources.** Tests never touch development data. `test/set-test-env.ts` (loaded after `dotenv/config`) points every Jest process at the database `streamtube_test`, the bucket `streamtube-test` and the queue prefix `streamtube-test`, forces `VIDEO_PART_SIZE_BYTES=5242880` and makes `S3_PUBLIC_ENDPOINT` equal to `S3_ENDPOINT` (inside the Docker network `localhost:9000` does not reach MinIO). `test/jest-global-setup.ts` recreates the `public` schema of `streamtube_test` and applies the migrations before every Jest run. Integration and e2e tests use the **real** Compose services (`db`, `minio`, `redis`), so `docker compose up -d` must be running; clean what you create with `cleanAllTables` (`src/test/create-test-data-source.ts`), `cleanStorage` (`src/test/clean-storage.ts`) and `cleanQueues` (`src/test/clean-queue.ts`).
+
+**Always wrap long Jest runs in `timeout`** (e.g. `timeout 900 npm test`): a module that cannot connect makes TypeORM retry forever and the run would hang instead of failing. Never add `Prefix` to `ListMultipartUploads` against MinIO: it returns an empty list, so filter by key on the client (as `src/test/clean-storage.ts` does).
+
+**FFmpeg-dependent tests.** `test/video-processing.e2e-spec.ts` boots the API **and** the real `WorkerModule` in the same process and uploads the fixtures in `test/fixtures/` (see its `README.md` for how they were generated). It needs `ffmpeg`/`ffprobe` on the PATH, which the `nestjs-api` image provides. Unit and integration tests mock the FFmpeg boundary (`MediaProbeService`).
+
 During active development, run only the tests related to the file being changed (`npm test -- path/to/file.spec.ts`). Before declaring a task done, run the full suite — see the global `CLAUDE.md` → "Definition of Done (Technical)".
 
 ## Long-running Processes
 
 Commands that never exit (dev server, watch modes) must be run in background in the Bash tool — otherwise the agent blocks indefinitely waiting for the process to return.
 
-This applies to: `start:dev`, `start:prod`, `test:watch`, and any other persistent process.
+This applies to: `start:dev`, `start:prod`, `start:worker`, `test:watch`, and any other persistent process.
+
+The `video-worker` service runs `nest start --watch`; on Windows bind mounts it does not see edits made on the host, so run `docker compose restart video-worker` after changing worker code. Its first compilation takes several minutes.
 
 ## Test Type Selection
 
@@ -121,6 +144,9 @@ These settings are required in `package.json` (jest config) and `test/jest-e2e.j
 
 - `setupFiles: ["dotenv/config"]` — without this, `.env` is not loaded inside the Jest process. `DB_HOST`, `JWT_SECRET`, etc. fall back to undefined or to the host's `localhost`, breaking container-to-container DNS.
 - `testRegex: '.*\\.(spec|integration-spec)\\.ts$'` — covers both unit (`*.spec.ts`) and integration (`*.integration-spec.ts`) suffixes.
+- `setupFiles` also lists `test/set-test-env.ts` after `dotenv/config`, and `globalSetup` points to `test/jest-global-setup.ts` (isolated test resources, see "Test execution").
+- `testTimeout: 60000` — the default 5 s makes the `beforeAll` of the slow-booting e2e suites fail.
+- `transform` / `transformIgnorePatterns` route `@nestjs/bullmq` and `@nestjs/bull-shared` (ESM-only packages that Jest cannot load) through `test/esm-to-cjs.transformer.js`. Node itself loads them natively, so the application needs no such workaround.
 
 Do not add new test-file suffixes; if a new test type is needed, update the regex deliberately.
 
@@ -138,6 +164,24 @@ MAIL_FROM="StreamTube <noreply@streamtube.local>"
 
 Whenever possible, prefer storing only the bare address in `.env` and composing display names in code (e.g., in `mail.config.ts`) so the file stays shell-safe.
 
+### Storage, queue and video variables
+
+Defined and validated (Joi) in `src/config/env.validation.ts`, read by `src/config/storage.config.ts`, `queue.config.ts` and `videos.config.ts`, and listed in `.env.example`:
+
+| Variable | Meaning |
+|---|---|
+| `S3_ENDPOINT` | Internal endpoint = the Compose service name (`http://minio:9000`), used by the API and the worker |
+| `S3_PUBLIC_ENDPOINT` | Endpoint baked into presigned URLs handed to clients |
+| `S3_REGION`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_BUCKET` | Credentials and the single private bucket |
+| `S3_PRESIGN_EXPIRES_SECONDS` | Lifetime of presigned URLs (default `3600`) |
+| `REDIS_HOST`, `REDIS_PORT`, `QUEUE_PREFIX` | BullMQ connection (`redis`, `6379`) and the key prefix |
+| `VIDEO_PART_SIZE_BYTES` | Multipart part size (default 64 MiB, minimum 5 MiB) |
+| `VIDEO_WORKER_CONCURRENCY` | Jobs the worker runs in parallel (default 4: a job mostly waits on storage reads, it reads ~1% of the file) |
+| `VIDEO_MAX_OPEN_DRAFTS` | Unfinished uploads (drafts) allowed per channel (default 20); the next `POST /videos` answers `429 TOO_MANY_OPEN_UPLOADS` |
+| `VIDEO_SWEEP_INTERVAL_MS`, `VIDEO_PROCESSING_STUCK_MINUTES`, `VIDEO_DRAFT_TTL_DAYS` | The maintenance sweep (interval, "stuck in processing" threshold, abandoned-draft age) |
+
+**The only permitted `localhost`:** `S3_PUBLIC_ENDPOINT=http://localhost:9000`. A presigned URL is consumed by the client (browser, `curl` on the host) **outside** the Docker network and its signature binds the `Host` header, so it must name an address the client can reach. Every other host (`db`, `redis`, `minio`, `S3_ENDPOINT`) stays a Compose service name.
+
 ## Build Assets
 
 `tsc` (and therefore `nest build`) only emits compiled `.ts` files to `dist/`. Any non-TypeScript runtime asset — Handlebars templates (`.hbs`), JSON fixtures, static config files, etc. — must be declared in `nest-cli.json` under `compilerOptions.assets` (with `watchAssets: true` for dev). Without that, the file exists in `src/` but is missing in `dist/` and runtime fails only after build.
@@ -148,13 +192,43 @@ NestJS with standard module structure. Source lives in `src/`, compiled output i
 
 - Each domain feature gets its own module (e.g., `UsersModule`, `VideosModule`) registered in `AppModule`
 - Controllers handle HTTP routing; Services hold business logic; both are scoped to their module
+- `DatabaseModule` (`src/database/database.module.ts`) owns the single TypeORM connection factory, shared by `AppModule` and the worker's `WorkerModule`. Because the connection uses `autoLoadEntities`, **every entity in a relation chain must be registered with `forFeature`** in the module that boots (`Video` → `Channel` → `User`); otherwise TypeORM fails with "Entity metadata … was not found"
+
+## Videos: upload, processing and delivery
+
+Plan, decisions and per-step progress: `docs/phases/phase-03-videos/` and `docs/decisions/technical-decisions-phase-03-videos.md`. Video **bytes never pass through the API**: the client uploads straight to S3-compatible storage and downloads/streams straight from it.
+
+| Module | Role |
+|---|---|
+| `src/videos/` | `VideosController` (7 routes), `VideoUploadsService` (draft → part URLs → complete), `VideoDeliveryService` (stream/download/thumbnail redirects), `VideosService` (persistence, ownership, status transitions), `VideoMaintenanceService` (sweep routines), `Video` entity + `CreateVideos` migration |
+| `src/storage/` | `StorageService`: two S3 clients (internal for API/worker, public only to sign client URLs), multipart, presigned URLs, `ensureBucket` on boot |
+| `src/queue/` | BullMQ queues `video-processing` and `video-maintenance`; `VideoQueueService` enqueues with `jobId = videoId` (idempotent) |
+| `src/worker/` | Separate application (`worker.main.ts` + `WorkerModule`, no HTTP server): `VideoProcessingProcessor`, `MediaProbeService` (ffprobe/ffmpeg via `spawn` with argument arrays), `VideoMaintenanceProcessor` and `VideoMaintenanceScheduler` |
+
+**Lifecycle:** `draft → processing → ready | error` (`ready` and `error` are final). `POST /videos` creates the draft and the multipart upload; `part-urls` signs part URLs; `complete` re-checks the parts and sizes against storage (`ListParts`), moves the video to `processing` and **only after that commit** enqueues the job. The worker reads the source through an internal presigned URL, extracts duration/metadata with `ffprobe`, renders a JPEG thumbnail, and finalises with conditional updates (`WHERE status = 'processing'`), so redelivered jobs change nothing. A file that is not a video ends as `error` with `failure_reason = NOT_A_VIDEO` without retries. The maintenance sweep (a BullMQ job scheduler, every `VIDEO_SWEEP_INTERVAL_MS`) re-enqueues videos stuck in `processing` and aborts + deletes abandoned drafts.
+
+**Routes** (`@Controller('videos')`; the exported contract is `openapi.json`): `POST /videos`, `POST /videos/:publicId/upload/part-urls`, `POST /videos/:publicId/upload/complete`, `GET /videos/:publicId` (owner only), and the public `GET /videos/:publicId/stream`, `/download`, `/thumbnail` (302 redirect to a presigned URL, `Cache-Control: no-store`, only for `ready` videos). `publicId` is an 11-character random id; the internal uuid is never exposed. Anyone but the owner, and any non-`ready` video on public routes, gets `404 VIDEO_NOT_FOUND`.
+
+**Part URLs are signed for an exact size.** `part-urls` returns `{ partNumber, sizeBytes, url }` per part and signs `Content-Length = sizeBytes` into the URL: every part has `partSizeBytes` except the last (the remainder). Storage answers `403` to a `PUT` of any other size, so a client cannot push oversized parts through an issued URL. Clients must send exactly that many bytes (a browser `fetch`/`XHR` with a `Blob` sets `Content-Length` itself; `scripts/smoke-upload.sh` does it with `curl -T`). Part and stream/download URLs last `S3_PRESIGN_EXPIRES_SECONDS` (1 h): a client that uploads slowly must ask for part URLs in small batches, and a player must request the `stream` redirect again if storage answers `403` (expired URL).
+
+**Security decisions:**
+- *Untrusted media.* `MediaProbeService` runs `ffprobe`/`ffmpeg` with `-format_whitelist` (only the mp4/mov/matroska/webm demuxers) and `-protocol_whitelist http,https,tcp,tls`, argument arrays (no shell), timeouts and an output cap; a format outside the list ends as `NOT_A_VIDEO`.
+- *Storage abuse.* Exact signed part sizes, `VIDEO_MAX_OPEN_DRAFTS` per channel, and the sweep that aborts drafts older than `VIDEO_DRAFT_TTL_DAYS`. There is **no per-user total storage quota** (a product decision not in the PRD): define one with the video management phase.
+- *Authorization* lives in services (`VideosService.findOwnedByPublicId`, `findReadyByPublicId`): non-owners and not-`ready` videos on public routes get the same `404` as unknown ids.
+- *Redirects* use `Cache-Control: no-store`; the presigned URL is the only capability handed out, and it never names the internal uuid.
+
+**Not implemented (tracked, not behavior of the current code):** production hardening (real S3 with least-privilege credentials, bucket CORS, Redis-backed rate limiting, retention for videos in `error`) and the requirements the next phases inherit (video visibility, quotas) are listed in `docs/backlog/phase-03-follow-ups.md`. In Compose the application uses the MinIO root user and the default CORS: development only.
+
+**Rate limits:** the global `ThrottlerGuard` allows 10 requests/minute, which would break a 10 GiB upload (~160 `part-urls` calls), so `part-urls` has an explicit `@Throttle` of 300/min, status 60/min and stream/download/thumbnail 120/min.
+
+**Manual end-to-end check:** `scripts/smoke-upload.sh <video file>` (host, `curl` only) runs the whole flow against a running API and reports duration, part count, final status and whether `GET /` kept answering `200`. The header of the script explains how to obtain `ACCESS_TOKEN`.
 
 ## Code Conventions
 
 - **TypeScript:** `nodenext` module resolution, `ES2023` target, `strictNullChecks` on, `noImplicitAny` off
 - **Decorators:** `emitDecoratorMetadata` + `experimentalDecorators` enabled — required for NestJS DI
 - **Prettier:** single quotes, trailing commas everywhere
-- **ESLint:** `no-explicit-any` allowed; `no-floating-promises` and `no-unsafe-argument` are warnings
+- **ESLint:** `no-explicit-any` allowed; `no-floating-promises` and `no-unsafe-argument` are warnings in `src`. In test files only (`*.spec.ts`, `*.integration-spec.ts`, `*.e2e-spec.ts`, `src/test/**`, `test/**`) the `no-unsafe-*` rules and `unbound-method` are off, because Jest mocks and supertest bodies are `any` by nature (`eslint.config.mjs`)
 
 ## REST Conventions
 
