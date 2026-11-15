@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 3/10 completed
+**SIs:** 6/10 completed
 
 ### SI-03.1 — Instalar dependências, configurar namespaces e subir MinIO e Redis no Compose
 - **Status:** completed
@@ -31,19 +31,32 @@
   - Ran jest once without --runInBand by mistake: two suites raced on the shared DB; recreating streamtube_test and rerunning serially passed. Always use --runInBand.
 
 ### SI-03.4 — Criar o StorageModule e o StorageService (S3)
-- **Status:** pending
-- **Tests:** pending
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 26 passing (storage.service.spec 15, storage.service.integration-spec 9 against real MinIO, storage.module.spec 1... see file counts); tsc 0; lint 0
+- **Observations:**
+  - StorageService.ensureBucket runs in onModuleInit, which is also what creates the test bucket streamtube-test.
+  - headObject returns null on 404 and ensureBucket/abort swallow only the specific not-found cases (intentional conversions, per service error rule); every other SDK failure is logged server-side and becomes StorageUnavailableException without leaking SDK text.
+  - Integration test covers a real 3-part multipart upload with direct PUTs to presigned URLs, ListParts sum, Range->206, attachment Content-Disposition, abort of a non-existent upload and an unreachable endpoint.
 
 ### SI-03.5 — Criar o QueueModule e o produtor de jobs de vídeo
-- **Status:** pending
-- **Tests:** pending
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 5 passing (queue.module.spec 1, video-queue.service.integration-spec 4 against real Redis); manual: job survived docker compose restart redis; tsc 0; lint 0
+- **Observations:**
+  - Plan deviation: ioredis@^5.11.1 had to be installed — bullmq 6 made it an optional peer dependency and the Queue throws 'could not load ioredis' otherwise.
+  - Plan deviation: @nestjs/bullmq 12 and @nestjs/bull-shared are ESM-only; Node 25 loads them via require(esm) but Jest cannot. Added test/esm-to-cjs.transformer.js (typescript.transpileModule) wired in package.json jest and test/jest-e2e.json (transform + transformIgnorePatterns) for those two packages only. Production Node must be >= 22.12.
+  - bullmq 6 no longer exposes queue.client; the prefix test uses its own ioredis client.
+  - Re-enqueue caveat for SI-03.9: jobId = videoId, and finished jobs are kept (removeOnComplete/Fail counts), so enqueueing an id whose old job still exists is ignored; the sweep must remove a stale failed job before re-enqueueing.
 
 ### SI-03.6 — Implementar o fluxo de upload: rascunho, URLs de partes e conclusão
-- **Status:** pending
-- **Tests:** pending
-- **Observations:** none
+- **Status:** completed
+- **Tests:** unit 21 (public-id.util 3, video-uploads.service 18), integration 10 (videos.service 9, video-uploads.service 1: DB+MinIO+Redis), e2e 14 (videos-upload.e2e-spec); full suite 223 unit/integration + 66 e2e; tsc 0; lint 0
+- **Observations:**
+  - Part size and partCount come from VIDEO_PART_SIZE_BYTES at request time (not stored per video): changing that setting while uploads are in flight would change partCount.
+  - markProcessing is one conditional UPDATE (WHERE status='draft') instead of an explicit transaction: atomic and race-safe (test: of two concurrent calls exactly one wins).
+  - The draft id is generated in the app (randomUUID) because the storage key embeds videos.id before the row exists; startUpload aborts the multipart upload if the insert fails.
+  - part-urls has @Throttle 300/min; POST /videos and /complete keep the global 10/min (e2e clears throttler storage in beforeEach, as auth e2e does).
+  - Added ChannelsService.findByUserId and src/common/database/pg-errors.ts (isPgUniqueViolationOnColumn). channels.service.ts still has its own private copy of that helper: deduplicating it is out of scope (follow-up).
+  - Fixed along the way: migrations.integration-spec dropped tables with Promise.all + CASCADE and deadlocked once videos (FK to channels) existed — now sequential; jest-global-setup now resets the public schema on every run so a failed run cannot leave leftovers (an orphan enum had broken the e2e globalSetup).
 
 ### SI-03.7 — Implementar o worker de vídeo: metadados, thumbnail e ciclo de status
 - **Status:** pending

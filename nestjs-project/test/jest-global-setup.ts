@@ -38,6 +38,11 @@ export default async function globalSetup(): Promise<void> {
   });
   await testDb.initialize();
   try {
+    // Start every run from an empty schema: a previous run that was interrupted
+    // or failed mid-migration must not leave leftovers (tables, enum types) that
+    // make the migrations fail here.
+    await testDb.query('DROP SCHEMA public CASCADE');
+    await testDb.query('CREATE SCHEMA public');
     // TypeORM only installs this when entities are loaded; the migrations need it.
     await testDb.query('CREATE EXTENSION IF NOT EXISTS "uuid-ossp"');
     await testDb.runMigrations();

@@ -64,4 +64,11 @@ export class ChannelsService {
       );
     });
   }
+
+  /** Channel owned by the user, or null when the user has none. */
+  async findByUserId(userId: string): Promise<Channel | null> {
+    return this.dataSource
+      .getRepository(Channel)
+      .findOne({ where: { user_id: userId } });
+  }
 }
