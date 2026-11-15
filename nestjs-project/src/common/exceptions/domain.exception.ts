@@ -48,3 +48,67 @@ export class TokenReuseDetectedException extends DomainException {
     );
   }
 }
+
+export class VideoNotFoundException extends DomainException {
+  constructor() {
+    super('VIDEO_NOT_FOUND', 404, 'Video not found');
+  }
+}
+
+export class VideoInvalidStateException extends DomainException {
+  constructor() {
+    super(
+      'VIDEO_INVALID_STATE',
+      409,
+      'Video is not in a valid state for this operation',
+    );
+  }
+}
+
+export class VideoTooLargeException extends DomainException {
+  constructor() {
+    super('VIDEO_TOO_LARGE', 413, 'Video exceeds the maximum size of 10 GiB');
+  }
+}
+
+export class InvalidPartNumberException extends DomainException {
+  constructor() {
+    super('INVALID_PART_NUMBER', 400, 'Part number is out of range');
+  }
+}
+
+export class UploadPartsMismatchException extends DomainException {
+  constructor() {
+    super(
+      'UPLOAD_PARTS_MISMATCH',
+      422,
+      'Parts sent do not match the parts stored',
+    );
+  }
+}
+
+export class UploadSizeMismatchException extends DomainException {
+  constructor() {
+    super(
+      'UPLOAD_SIZE_MISMATCH',
+      422,
+      'Stored size does not match the declared size',
+    );
+  }
+}
+
+export class StorageUnavailableException extends DomainException {
+  constructor() {
+    super('STORAGE_UNAVAILABLE', 503, 'Storage service is unavailable');
+  }
+}
+
+export class TooManyOpenUploadsException extends DomainException {
+  constructor() {
+    super(
+      'TOO_MANY_OPEN_UPLOADS',
+      429,
+      'Too many unfinished uploads: complete or wait for older ones to expire',
+    );
+  }
+}

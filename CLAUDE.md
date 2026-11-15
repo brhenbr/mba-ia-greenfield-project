@@ -20,10 +20,12 @@ See `docs/diagrams/software-arch.mermaid` for the full diagram. Key containers:
 
 - **Frontend** (Next.js) → calls API via REST, streams from Object Storage
 - **API** (Nest.js) → business rules, auth, reads/writes DB, uploads to storage, publishes jobs to queue, sends emails
-- **Video Worker** (FFmpeg) → consumes jobs from queue, processes videos, updates DB and storage
+- **Video Worker** (FFmpeg) → consumes jobs from queue, processes videos, updates DB and storage (Compose service `video-worker`, same codebase as the API, entry point `nestjs-project/src/worker/worker.main.ts`)
 - **Database** (PostgreSQL) → users, channels, videos, comments, likes
-- **Object Storage** (S3/MinIO) → video files and thumbnails
-- **Message Queue** (TBD) → video processing job queue
+- **Object Storage** (S3-compatible, MinIO in Compose — development only, the upstream is archived) → video files and thumbnails; clients upload and stream directly to it through presigned URLs, so video bytes never pass through the API
+- **Message Queue** (BullMQ on Redis, Compose service `redis`) → video processing and maintenance job queues
+
+Video upload, processing and delivery (Phase 03) are documented in `nestjs-project/CLAUDE.md` ("Videos: upload, processing and delivery") and in `docs/phases/phase-03-videos/`. The video user interface (player, download button) is out of scope until Phase 05.
 - **Email Service** (SMTP) → account confirmation and password recovery
 
 ## Docker Networking
@@ -34,6 +36,8 @@ Inside a container, `localhost` refers to the container itself, not the host mac
 
 - **Correct:** `DB_HOST=db` (the Compose service name)
 - **Wrong:** `DB_HOST=localhost`
+
+The same applies to `REDIS_HOST=redis` and `S3_ENDPOINT=http://minio:9000`. **The single exception is `S3_PUBLIC_ENDPOINT=http://localhost:9000`:** it is the address baked into presigned URLs that clients (a browser, `curl` on the host) call from **outside** the Docker network, and the URL signature binds that host. It is never used for container-to-container traffic.
 
 This applies to all environment variables, configuration files, and code that references service hosts.
 
