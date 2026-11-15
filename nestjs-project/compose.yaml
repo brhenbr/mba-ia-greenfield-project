@@ -17,6 +17,21 @@ services:
       redis:
         condition: service_healthy
 
+  video-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    command: npm run start:worker
+    volumes:
+      - .:/home/node/app
+    depends_on:
+      db:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
   minio:
     # Upstream MinIO is archived and this image is unpatched: development only.
     image: bitnamilegacy/minio:2025.7.23

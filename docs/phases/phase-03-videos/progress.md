@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 6/10 completed
+**SIs:** 7/10 completed
 
 ### SI-03.1 — Instalar dependências, configurar namespaces e subir MinIO e Redis no Compose
 - **Status:** completed
@@ -59,9 +59,17 @@
   - Fixed along the way: migrations.integration-spec dropped tables with Promise.all + CASCADE and deadlocked once videos (FK to channels) existed — now sequential; jest-global-setup now resets the public schema on every run so a failed run cannot leave leftovers (an orphan enum had broken the e2e globalSetup).
 
 ### SI-03.7 — Implementar o worker de vídeo: metadados, thumbnail e ciclo de status
-- **Status:** pending
-- **Tests:** pending
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 30 new unit/integration (media-probe.service.spec, video-processing.processor.integration-spec, worker.module.spec) + 4 new e2e (video-processing.e2e-spec: sample.mp4/webm/mov to ready, text file to NOT_A_VIDEO); full suite 253 unit/integration + 70 e2e; tsc 0; lint 0
+- **Observations:**
+  - Plan deviation (FFmpeg version): node:25.6.0-slim is Debian bookworm whose ffmpeg package is 5.1, but the plan requires FFmpeg >= 7. Both Dockerfile.worker and Dockerfile.dev copy static ffmpeg/ffprobe 7.1 from mwader/static-ffmpeg:7.1 instead of apt. docker compose exec video-worker ffmpeg -version reports 7.1.
+  - Dockerfile.dev (nestjs-api) now also ships ffmpeg/ffprobe: the e2e pipeline test runs the real WorkerModule in-process against the isolated test resources (the compose video-worker uses the dev DB/bucket/queue prefix, so it cannot consume test jobs). The API never calls ffmpeg at runtime.
+  - Extracted DatabaseModule and config-module.options.ts (shared by AppModule and WorkerModule). WorkerModule registers Video, Channel and User with forFeature: with autoLoadEntities TypeORM only knows registered entities, and Video -> Channel -> User; missing this made the worker loop on 'Entity metadata for Video#channel was not found'.
+  - start:worker uses tsconfig.worker.json (outDir dist-worker) so the worker's nest build does not clobber dist/ used by start:dev; dist-worker is gitignored and excluded from tsconfig.json/tsconfig.worker.json (otherwise the watch rebuild fails with TS5055).
+  - Dev gotcha: on Windows bind mounts nest start --watch does not see host file edits; restart the video-worker service after changing code. First compile in the container takes several minutes.
+  - Concurrency: @Processor cannot read config (decorator runs before ConfigModule loads .env), so VIDEO_WORKER_CONCURRENCY is applied in onApplicationBootstrap via worker.concurrency.
+  - Processing: ffprobe reads over the internal presigned URL; unknown/non-media data (stderr 'Invalid data found') and containers outside mov/mp4/matroska/webm map to NOT_A_VIDEO (UnrecoverableError, no retry); ffprobe/ffmpeg are spawned with argument arrays, timeouts, and the signed URL is redacted from error text.
+  - Test hang lesson: worker.module.spec compiled WorkerModule against the real DB; the entity-metadata bug made TypeORM retry forever, hanging jest. Always run long jest invocations with timeout.
 
 ### SI-03.8 — Implementar a entrega: status do vídeo, streaming, download e thumbnail
 - **Status:** pending

@@ -1,0 +1,17 @@
+# Static FFmpeg 7.1 binaries (ffmpeg + ffprobe). The Debian package of the Node
+# base image is FFmpeg 5.x, and the plan requires FFmpeg >= 7.
+FROM mwader/static-ffmpeg:7.1 AS ffmpeg
+
+FROM node:25.6.0-slim
+
+COPY --from=ffmpeg /ffmpeg /ffprobe /usr/local/bin/
+
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends procps curl \
+  && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /home/node/app
+
+USER node
+
+CMD [ "tail", "-f", "/dev/null" ]

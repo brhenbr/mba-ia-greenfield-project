@@ -6,7 +6,7 @@ import {
   VideoInvalidStateException,
   VideoNotFoundException,
 } from '../common/exceptions/domain.exception';
-import { Video } from './entities/video.entity';
+import { Video, type VideoMetadata } from './entities/video.entity';
 import { generatePublicId } from './public-id.util';
 import { PUBLIC_ID_MAX_ATTEMPTS, PUBLIC_ID_PATTERN } from './videos.constants';
 import { VideoStatus } from './video-status.enum';
@@ -19,6 +19,12 @@ export interface CreateDraftInput {
   sizeBytes: number;
   sourceKey: string;
   uploadId: string;
+}
+
+export interface ProcessingResult {
+  durationSeconds: number | null;
+  metadata: VideoMetadata;
+  thumbnailKey: string;
 }
 
 @Injectable()
@@ -99,5 +105,47 @@ export class VideosService {
     if (!result.affected) {
       throw new VideoInvalidStateException();
     }
+  }
+
+  async findById(videoId: string): Promise<Video | null> {
+    return this.videoRepository.findOneBy({ id: videoId });
+  }
+
+  /**
+   * `processing → ready`, written by the worker. Conditional on `processing`,
+   * so a duplicate delivery matches no row and changes nothing (not even
+   * `updated_at`). Returns whether the row was updated.
+   */
+  async markReady(videoId: string, result: ProcessingResult): Promise<boolean> {
+    const update = await this.videoRepository
+      .createQueryBuilder()
+      .update(Video)
+      .set({
+        status: VideoStatus.READY,
+        duration_seconds: result.durationSeconds,
+        metadata: result.metadata,
+        thumbnail_key: result.thumbnailKey,
+        failure_reason: null,
+      })
+      .where('id = :id AND status = :processing', {
+        id: videoId,
+        processing: VideoStatus.PROCESSING,
+      })
+      .execute();
+    return (update.affected ?? 0) > 0;
+  }
+
+  /** `processing → error` with a failure code; same idempotence as `markReady`. */
+  async markError(videoId: string, failureReason: string): Promise<boolean> {
+    const update = await this.videoRepository
+      .createQueryBuilder()
+      .update(Video)
+      .set({ status: VideoStatus.ERROR, failure_reason: failureReason })
+      .where('id = :id AND status = :processing', {
+        id: videoId,
+        processing: VideoStatus.PROCESSING,
+      })
+      .execute();
+    return (update.affected ?? 0) > 0;
   }
 }
