@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 7/10 completed
+**SIs:** 8/10 completed
 
 ### SI-03.1 — Instalar dependências, configurar namespaces e subir MinIO e Redis no Compose
 - **Status:** completed
@@ -72,9 +72,13 @@
   - Test hang lesson: worker.module.spec compiled WorkerModule against the real DB; the entity-metadata bug made TypeORM retry forever, hanging jest. Always run long jest invocations with timeout.
 
 ### SI-03.8 — Implementar a entrega: status do vídeo, streaming, download e thumbnail
-- **Status:** pending
-- **Tests:** pending
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 19 new unit (video-delivery.service.spec 18, videos.module.spec 1) + 22 new e2e (videos-delivery.e2e-spec); full suite 272 unit/integration + 92 e2e; tsc 0; lint 0
+- **Observations:**
+  - Express adds a short 'Found. Redirecting to <url>' body to every 302; the e2e asserts it is that notice only (< 2 KB), i.e. no video bytes through the API.
+  - Download filenames are sanitized for header safety: quotes, backslashes and control characters removed, non-ASCII replaced by '_' (a raw UTF-8 name in Content-Disposition would show as mojibake); falls back to {publicId}.{ext} when nothing usable remains. StorageService.presignGetObject also escapes quotes as a second line of defence.
+  - Throttle: GET /videos/:publicId 60/min; stream, download and thumbnail 120/min (tested: 15 calls in a minute are not 429).
+  - Added VideosService.findReadyByPublicId: anonymous delivery only ever sees ready videos, so draft/processing/error answer exactly like unknown ids (404 VIDEO_NOT_FOUND).
 
 ### SI-03.9 — Implementar a reconciliação e a limpeza de uploads abandonados
 - **Status:** pending

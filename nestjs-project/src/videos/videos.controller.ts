@@ -1,10 +1,13 @@
 import {
   Body,
   Controller,
+  Get,
+  Header,
   HttpCode,
   HttpStatus,
   Param,
   Post,
+  Redirect,
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
@@ -16,6 +19,7 @@ import {
 import { Throttle } from '@nestjs/throttler';
 import type { JwtPayload } from '../auth/auth.types';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { Public } from '../auth/decorators/public.decorator';
 import { ApiErrorEnvelope } from '../common/openapi/api-error-envelope.dto';
 import { CompleteUploadDto } from './dto/complete-upload.dto';
 import { CreateVideoDto } from './dto/create-video.dto';
@@ -25,12 +29,24 @@ import {
   PartUrlsResponseDto,
   UploadCompletedResponseDto,
 } from './dto/upload-responses.dto';
+import { VideoStatusResponseDto } from './dto/video-status-response.dto';
+import { VideoDeliveryService } from './video-delivery.service';
 import { VideoUploadsService } from './video-uploads.service';
+import { VideosService } from './videos.service';
+
+interface RedirectResult {
+  url: string;
+  statusCode: number;
+}
 
 @ApiTags('videos')
 @Controller('videos')
 export class VideosController {
-  constructor(private readonly videoUploadsService: VideoUploadsService) {}
+  constructor(
+    private readonly videoUploadsService: VideoUploadsService,
+    private readonly videoDeliveryService: VideoDeliveryService,
+    private readonly videosService: VideosService,
+  ) {}
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
@@ -180,5 +196,129 @@ export class VideosController {
     @Body() dto: CompleteUploadDto,
   ): Promise<UploadCompletedResponseDto> {
     return this.videoUploadsService.completeUpload(user.sub, publicId, dto);
+  }
+
+  // Polled by the client while a video is `processing`.
+  @Throttle({ default: { limit: 60, ttl: 60000 } })
+  @Get(':publicId')
+  @ApiBearerAuth('access-token')
+  @ApiOperation({
+    summary: 'Get the status of a video',
+    description:
+      'Owner-only status and extracted metadata, used to follow the processing lifecycle.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Video status and metadata',
+    type: VideoStatusResponseDto,
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'Missing or invalid access token',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'VIDEO_NOT_FOUND: unknown id or not owned by the caller',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  async status(
+    @CurrentUser() user: JwtPayload,
+    @Param('publicId') publicId: string,
+  ): Promise<VideoStatusResponseDto> {
+    return this.videosService.getOwnedStatus(publicId, user.sub);
+  }
+
+  @Public()
+  @Throttle({ default: { limit: 120, ttl: 60000 } })
+  @Get(':publicId/stream')
+  @Redirect()
+  @Header('Cache-Control', 'no-store')
+  @ApiOperation({
+    summary: 'Stream a video',
+    description:
+      'Redirects to a short-lived presigned URL; storage answers Range requests with 206. Only ready videos.',
+  })
+  @ApiResponse({
+    status: 302,
+    description: 'Redirect to the presigned GET URL of the video',
+    headers: {
+      Location: { schema: { type: 'string' } },
+      'Cache-Control': { schema: { type: 'string', example: 'no-store' } },
+    },
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'VIDEO_NOT_FOUND: unknown id or the video is not ready',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  async stream(@Param('publicId') publicId: string): Promise<RedirectResult> {
+    return {
+      url: await this.videoDeliveryService.getStreamUrl(publicId),
+      statusCode: HttpStatus.FOUND,
+    };
+  }
+
+  @Public()
+  @Throttle({ default: { limit: 120, ttl: 60000 } })
+  @Get(':publicId/download')
+  @Redirect()
+  @Header('Cache-Control', 'no-store')
+  @ApiOperation({
+    summary: 'Download a video',
+    description:
+      'Redirects to a presigned URL that forces Content-Disposition: attachment. Only ready videos.',
+  })
+  @ApiResponse({
+    status: 302,
+    description: 'Redirect to the presigned download URL',
+    headers: {
+      Location: { schema: { type: 'string' } },
+      'Cache-Control': { schema: { type: 'string', example: 'no-store' } },
+    },
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'VIDEO_NOT_FOUND: unknown id or the video is not ready',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  async download(@Param('publicId') publicId: string): Promise<RedirectResult> {
+    return {
+      url: await this.videoDeliveryService.getDownloadUrl(publicId),
+      statusCode: HttpStatus.FOUND,
+    };
+  }
+
+  @Public()
+  @Throttle({ default: { limit: 120, ttl: 60000 } })
+  @Get(':publicId/thumbnail')
+  @Redirect()
+  @Header('Cache-Control', 'no-store')
+  @ApiOperation({
+    summary: 'Get the thumbnail of a video',
+    description:
+      'Redirects to a presigned URL of the JPEG thumbnail. Only ready videos.',
+  })
+  @ApiResponse({
+    status: 302,
+    description: 'Redirect to the presigned thumbnail URL',
+    headers: {
+      Location: { schema: { type: 'string' } },
+      'Cache-Control': { schema: { type: 'string', example: 'no-store' } },
+    },
+  })
+  @ApiResponse({
+    status: 404,
+    description:
+      'VIDEO_NOT_FOUND: unknown id, the video is not ready, or it has no thumbnail',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  async thumbnail(
+    @Param('publicId') publicId: string,
+  ): Promise<RedirectResult> {
+    return {
+      url: await this.videoDeliveryService.getThumbnailUrl(publicId),
+      statusCode: HttpStatus.FOUND,
+    };
   }
 }

@@ -6,6 +6,7 @@ import {
   VideoInvalidStateException,
   VideoNotFoundException,
 } from '../common/exceptions/domain.exception';
+import type { VideoStatusResponseDto } from './dto/video-status-response.dto';
 import { Video, type VideoMetadata } from './entities/video.entity';
 import { generatePublicId } from './public-id.util';
 import { PUBLIC_ID_MAX_ATTEMPTS, PUBLIC_ID_PATTERN } from './videos.constants';
@@ -76,6 +77,42 @@ export class VideosService {
     }
     const video = await this.videoRepository.findOne({
       where: { public_id: publicId, channel: { user_id: userId } },
+    });
+    if (!video) {
+      throw new VideoNotFoundException();
+    }
+    return video;
+  }
+
+  /** Owner-only view of a video's status and extracted metadata. */
+  async getOwnedStatus(
+    publicId: string,
+    userId: string,
+  ): Promise<VideoStatusResponseDto> {
+    const video = await this.findOwnedByPublicId(publicId, userId);
+    return {
+      publicId: video.public_id,
+      status: video.status,
+      title: video.title,
+      originalFilename: video.original_filename,
+      durationSeconds: video.duration_seconds,
+      metadata: video.metadata,
+      failureReason: video.failure_reason,
+      createdAt: video.created_at.toISOString(),
+      updatedAt: video.updated_at.toISOString(),
+    };
+  }
+
+  /**
+   * Public lookup for delivery: only `ready` videos exist for anonymous
+   * callers; drafts, processing and failed videos answer like unknown ids.
+   */
+  async findReadyByPublicId(publicId: string): Promise<Video> {
+    if (!PUBLIC_ID_PATTERN.test(publicId)) {
+      throw new VideoNotFoundException();
+    }
+    const video = await this.videoRepository.findOne({
+      where: { public_id: publicId, status: VideoStatus.READY },
     });
     if (!video) {
       throw new VideoNotFoundException();
