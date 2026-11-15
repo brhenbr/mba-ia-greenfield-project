@@ -12,6 +12,38 @@ services:
         condition: service_healthy
       mailpit:
         condition: service_started
+      minio:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  minio:
+    # Upstream MinIO is archived and this image is unpatched: development only.
+    image: bitnamilegacy/minio:2025.7.23
+    ports:
+      - "9000:9000"
+    environment:
+      - MINIO_ROOT_USER=${S3_ACCESS_KEY_ID}
+      - MINIO_ROOT_PASSWORD=${S3_SECRET_ACCESS_KEY}
+      - MINIO_DEFAULT_BUCKETS=${S3_BUCKET}
+    volumes:
+      - minio_data:/bitnami/minio/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
   db:
     image: postgres:17
@@ -34,3 +66,7 @@ services:
       - "8025:8025"
 
 
+
+volumes:
+  minio_data:
+  redis_data:
