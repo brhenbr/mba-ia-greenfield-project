@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 2/10 completed
+**SIs:** 3/10 completed
 
 ### SI-03.1 — Instalar dependências, configurar namespaces e subir MinIO e Redis no Compose
 - **Status:** completed
@@ -22,9 +22,13 @@
   - Fixtures: sample.mp4 6.9 KB, sample.webm 10.2 KB, sample.mov 6.9 KB; ffprobe confirms h264/vp9 320x240, 2 s. Bucket `streamtube-test` is only named here; creating it is for SI-03.4.
 
 ### SI-03.3 — Criar a entidade Video, a migration CreateVideos e as exceções de domínio
-- **Status:** pending
-- **Tests:** pending
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 9 passing in SI scope (video.entity.integration-spec 6, migrations.integration-spec 3); full suite 162 unit/integration + 52 e2e; tsc 0; lint 0
+- **Observations:**
+  - Channel now references Video, so every test entity array (11 spec files) and AppModule had to know Video: added Video to ALL_ENTITIES in existing specs and created a minimal VideosModule (TypeOrmModule.forFeature([Video])) imported by AppModule so autoLoadEntities finds it; SI-03.6 extends this module.
+  - Migration CreateVideos1794708056410 generated with the TypeORM CLI against the migrated dev DB; down drops table, indexes, FK and the videos_status_enum type (verified by test); also applied to the dev DB.
+  - migrations.integration-spec now drops videos and videos_status_enum before running; the revert test was split in two (revert CreateVideos, then CreateAuthTokens).
+  - Ran jest once without --runInBand by mistake: two suites raced on the shared DB; recreating streamtube_test and rerunning serially passed. Always use --runInBand.
 
 ### SI-03.4 — Criar o StorageModule e o StorageService (S3)
 - **Status:** pending
