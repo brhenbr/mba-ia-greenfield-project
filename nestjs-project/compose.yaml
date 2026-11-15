@@ -22,6 +22,9 @@ services:
       context: .
       dockerfile: Dockerfile.worker
     command: npm run start:worker
+    # On a fresh clone node_modules does not exist until `npm install` runs in
+    # nestjs-api: retry instead of staying down.
+    restart: on-failure
     volumes:
       - .:/home/node/app
     depends_on:
@@ -38,9 +41,11 @@ services:
     ports:
       - "9000:9000"
     environment:
-      - MINIO_ROOT_USER=${S3_ACCESS_KEY_ID}
-      - MINIO_ROOT_PASSWORD=${S3_SECRET_ACCESS_KEY}
-      - MINIO_DEFAULT_BUCKETS=${S3_BUCKET}
+      # Defaults equal the values of .env.example, so the stack also starts
+      # before .env exists and the credentials never change afterwards.
+      - MINIO_ROOT_USER=${S3_ACCESS_KEY_ID:-streamtube}
+      - MINIO_ROOT_PASSWORD=${S3_SECRET_ACCESS_KEY:-streamtube-secret}
+      - MINIO_DEFAULT_BUCKETS=${S3_BUCKET:-streamtube-videos}
     volumes:
       - minio_data:/bitnami/minio/data
     healthcheck:
