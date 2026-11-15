@@ -127,3 +127,9 @@ Done at the end, repeating what an evaluator would do: `git clone` of the fork (
 
 - **Found and fixed (they blocked the delivery):** (1) `cp .env.example .env` made every `docker compose` command fail (`MAIL_FROM` value not quoted); (2) without `.env` the MinIO variables of `compose.yaml` were blank; (3) `video-worker` exited with `nest: not found` (127) before `npm install` and never came back. Fixes in `nestjs-project/.env.example` and `nestjs-project/compose.yaml` (single-quoted `MAIL_FROM`, `${S3_*:-default}` values equal to `.env.example`, `restart: on-failure` on `video-worker`), on branch `bugfix/compose-fresh-clone`.
 - Everything that was found but is outside the scope of the phase (visibility/publication rules for the next phase, quotas, production hardening, technical debt) is recorded, with its origin, in `docs/backlog/phase-03-follow-ups.md`.
+
+## Final verification of the delivered tree
+
+Run in the container on the exact tree merged to `main` (after the clean-clone fixes and the closing docs): `npx tsc --noEmit` exit 0; `npm run lint` exit 0; `npm test` (serial) 42 suites / 307 tests passed; `npm run test:e2e` (serial) 6 suites / 94 tests passed; `npm run build` exit 0; `docker compose config` valid with the `.env` copied from `.env.example`.
+
+One more defect of the phase's own tests was found by that last run and fixed: `src/test/test-isolation.integration-spec.ts` counted rows in the development database `users` table, which does not exist when that database has not been migrated (fresh clone, or a recreated `db` container: the `db` service has no volume). It now looks for a marker row only when the table exists, and passes with the development database empty and migrated.
