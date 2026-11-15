@@ -641,21 +641,21 @@ Ordem linearizada de implementação: SI-03.1 → SI-03.2 → SI-03.3, SI-03.5 (
 
 ## Deliverables
 
-- [ ] SI-03.1 — Instalar dependências, configurar namespaces e subir MinIO e Redis no Compose
-- [ ] SI-03.2 — Isolar a infraestrutura de testes e gerar fixtures de vídeo
-- [ ] SI-03.3 — Criar a entidade Video, a migration CreateVideos e as exceções de domínio
-- [ ] SI-03.4 — Criar o StorageModule e o StorageService (S3)
-- [ ] SI-03.5 — Criar o QueueModule e o produtor de jobs de vídeo
-- [ ] SI-03.6 — Implementar o fluxo de upload: rascunho, URLs de partes e conclusão
-- [ ] SI-03.7 — Implementar o worker de vídeo: metadados, thumbnail e ciclo de status
-- [ ] SI-03.8 — Implementar a entrega: status do vídeo, streaming, download e thumbnail
-- [ ] SI-03.9 — Implementar a reconciliação e a limpeza de uploads abandonados
-- [ ] SI-03.10 — Exportar o OpenAPI, atualizar o CLAUDE.md, medir o upload de 10 GiB e fechar a Definition of Done
+- [x] SI-03.1 — Instalar dependências, configurar namespaces e subir MinIO e Redis no Compose
+- [x] SI-03.2 — Isolar a infraestrutura de testes e gerar fixtures de vídeo
+- [x] SI-03.3 — Criar a entidade Video, a migration CreateVideos e as exceções de domínio
+- [x] SI-03.4 — Criar o StorageModule e o StorageService (S3)
+- [x] SI-03.5 — Criar o QueueModule e o produtor de jobs de vídeo
+- [x] SI-03.6 — Implementar o fluxo de upload: rascunho, URLs de partes e conclusão
+- [x] SI-03.7 — Implementar o worker de vídeo: metadados, thumbnail e ciclo de status
+- [x] SI-03.8 — Implementar a entrega: status do vídeo, streaming, download e thumbnail
+- [x] SI-03.9 — Implementar a reconciliação e a limpeza de uploads abandonados
+- [x] SI-03.10 — Exportar o OpenAPI, atualizar o CLAUDE.md, medir o upload de 10 GiB e fechar a Definition of Done
 
 **Full test suites:**
 
-- [ ] Backend tests pass (`cd nestjs-project && docker compose exec nestjs-api npm test -- --runInBand`)
-- [ ] E2E tests pass (`cd nestjs-project && docker compose exec nestjs-api npm run test:e2e`)
-- [ ] Type/compilation checks pass (`cd nestjs-project && docker compose exec nestjs-api npx tsc --noEmit`)
-- [ ] Lint passes (`cd nestjs-project && docker compose exec nestjs-api npm run lint`)
-- [ ] Project builds successfully (`cd nestjs-project && docker compose exec nestjs-api npm run build`)
+- [x] Backend tests pass (`cd nestjs-project && docker compose exec nestjs-api npm test -- --runInBand`)
+- [x] E2E tests pass (`cd nestjs-project && docker compose exec nestjs-api npm run test:e2e`)
+- [x] Type/compilation checks pass (`cd nestjs-project && docker compose exec nestjs-api npx tsc --noEmit`)
+- [x] Lint passes (`cd nestjs-project && docker compose exec nestjs-api npm run lint`)
+- [x] Project builds successfully (`cd nestjs-project && docker compose exec nestjs-api npm run build`)
