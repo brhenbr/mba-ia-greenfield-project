@@ -13,11 +13,14 @@ const requiredEnv = {
   JWT_REFRESH_SECRET: 'refresh-secret',
 };
 
-const validate = (env: Record<string, string>) =>
-  envValidationSchema.validate(
+/** Joi types `value` as `any`; the validated env is a flat string map. */
+const validate = (env: Record<string, string>) => {
+  const { error, value } = envValidationSchema.validate(
     { ...requiredEnv, ...env },
     { allowUnknown: true, abortEarly: false },
-  );
+  ) as { error?: Error; value: Record<string, string> };
+  return { error, value };
+};
 
 describe('envValidationSchema — SWAGGER_ENABLED', () => {
   it('should reject SWAGGER_ENABLED with an invalid value', () => {

@@ -228,7 +228,7 @@ Plan, decisions and per-step progress: `docs/phases/phase-03-videos/` and `docs/
 - **TypeScript:** `nodenext` module resolution, `ES2023` target, `strictNullChecks` on, `noImplicitAny` off
 - **Decorators:** `emitDecoratorMetadata` + `experimentalDecorators` enabled — required for NestJS DI
 - **Prettier:** single quotes, trailing commas everywhere
-- **ESLint:** `no-explicit-any` allowed; `no-floating-promises` and `no-unsafe-argument` are warnings in `src`. In test files only (`*.spec.ts`, `*.integration-spec.ts`, `*.e2e-spec.ts`, `src/test/**`, `test/**`) the `no-unsafe-*` rules and `unbound-method` are off, because Jest mocks and supertest bodies are `any` by nature (`eslint.config.mjs`)
+- **ESLint:** `no-explicit-any` allowed; `no-floating-promises` and `no-unsafe-argument` are warnings in `src`. The `no-unsafe-*` rules and `unbound-method` stay **on in test files too**: do not disable them in `eslint.config.mjs`, type the data instead. Use `bodyOf<Dto>(request…)`, `bodyFrom<Dto>(res)` and `errorBodyOf`/`errorCodeOf` from `src/test/body-of.ts` for supertest bodies (reuse the response DTOs, `ApiErrorEnvelope`), `MockOf<T>`/`mockFor<T>` from `src/test/mock-of.ts` for Jest mocks (not `jest.Mocked<T>`, which trips `unbound-method`), and the typed helpers in `src/test/mailpit.ts`. Prefer `app.get(Service)` over reaching into private fields with `as any`
 
 ## REST Conventions
 

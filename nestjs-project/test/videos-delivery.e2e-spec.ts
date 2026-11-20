@@ -15,9 +15,11 @@ import { ValidationExceptionFilter } from '../src/common/filters/validation-exce
 import storageConfig from '../src/config/storage.config';
 import { S3_INTERNAL_CLIENT } from '../src/storage/storage.constants';
 import { StorageService } from '../src/storage/storage.service';
+import { bodyOf, errorBodyOf } from '../src/test/body-of';
 import { cleanStorage } from '../src/test/clean-storage';
 import { cleanAllTables } from '../src/test/create-test-data-source';
 import { User } from '../src/users/entities/user.entity';
+import type { VideoStatusResponseDto } from '../src/videos/dto/video-status-response.dto';
 import { Video } from '../src/videos/entities/video.entity';
 import { VideoStatus } from '../src/videos/video-status.enum';
 
@@ -139,10 +141,12 @@ describe('Videos delivery (e2e)', () => {
     it('should return the status, duration and metadata to the owner', async () => {
       const publicId = await seedVideo(VideoStatus.READY);
 
-      const { body } = await request(app.getHttpServer())
-        .get(`/videos/${publicId}`)
-        .set('Authorization', `Bearer ${ownerToken}`)
-        .expect(200);
+      const body = await bodyOf<VideoStatusResponseDto>(
+        request(app.getHttpServer())
+          .get(`/videos/${publicId}`)
+          .set('Authorization', `Bearer ${ownerToken}`)
+          .expect(200),
+      );
 
       expect(body).toMatchObject({
         publicId,
@@ -161,10 +165,12 @@ describe('Videos delivery (e2e)', () => {
         failure_reason: 'NOT_A_VIDEO',
       });
 
-      const { body } = await request(app.getHttpServer())
-        .get(`/videos/${publicId}`)
-        .set('Authorization', `Bearer ${ownerToken}`)
-        .expect(200);
+      const body = await bodyOf<VideoStatusResponseDto>(
+        request(app.getHttpServer())
+          .get(`/videos/${publicId}`)
+          .set('Authorization', `Bearer ${ownerToken}`)
+          .expect(200),
+      );
 
       expect(body).toMatchObject({
         status: 'error',
@@ -177,10 +183,12 @@ describe('Videos delivery (e2e)', () => {
     it('should answer 404 to another user and 401 without a token', async () => {
       const publicId = await seedVideo(VideoStatus.READY);
 
-      const { body } = await request(app.getHttpServer())
-        .get(`/videos/${publicId}`)
-        .set('Authorization', `Bearer ${otherToken}`)
-        .expect(404);
+      const body = await errorBodyOf(
+        request(app.getHttpServer())
+          .get(`/videos/${publicId}`)
+          .set('Authorization', `Bearer ${otherToken}`)
+          .expect(404),
+      );
       await request(app.getHttpServer()).get(`/videos/${publicId}`).expect(401);
 
       expect(body.error).toBe('VIDEO_NOT_FOUND');
@@ -293,18 +301,22 @@ describe('Videos delivery (e2e)', () => {
         async (status) => {
           const publicId = await seedVideo(status);
 
-          const { body } = await request(app.getHttpServer())
-            .get(`/videos/${publicId}/${route}`)
-            .expect(404);
+          const body = await errorBodyOf(
+            request(app.getHttpServer())
+              .get(`/videos/${publicId}/${route}`)
+              .expect(404),
+          );
 
           expect(body.error).toBe('VIDEO_NOT_FOUND');
         },
       );
 
       it('should answer 404 VIDEO_NOT_FOUND for an unknown id', async () => {
-        const { body } = await request(app.getHttpServer())
-          .get(`/videos/unknownid_1/${route}`)
-          .expect(404);
+        const body = await errorBodyOf(
+          request(app.getHttpServer())
+            .get(`/videos/unknownid_1/${route}`)
+            .expect(404),
+        );
 
         expect(body.error).toBe('VIDEO_NOT_FOUND');
       });

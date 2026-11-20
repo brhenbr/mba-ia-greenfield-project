@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto';
-import { ConfigModule } from '@nestjs/config';
+import { ConfigModule, type ConfigType } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { S3Client } from '@aws-sdk/client-s3';
@@ -123,12 +123,11 @@ describe('VideoProcessingProcessor (integration: DB + MinIO, FFmpeg mocked)', ()
 
   afterAll(async () => {
     await cleanAllTables(dataSource);
-    await cleanStorage(s3, moduleRef.get(storageConfig.KEY).bucket, 'videos/');
-    await cleanStorage(
-      s3,
-      moduleRef.get(storageConfig.KEY).bucket,
-      'thumbnails/',
+    const { bucket } = moduleRef.get<ConfigType<typeof storageConfig>>(
+      storageConfig.KEY,
     );
+    await cleanStorage(s3, bucket, 'videos/');
+    await cleanStorage(s3, bucket, 'thumbnails/');
     await moduleRef.close();
   });
 
