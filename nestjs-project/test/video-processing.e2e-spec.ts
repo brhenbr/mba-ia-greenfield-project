@@ -23,10 +23,15 @@ import {
 } from '../src/queue/queue.constants';
 import { S3_INTERNAL_CLIENT } from '../src/storage/storage.constants';
 import { StorageService } from '../src/storage/storage.service';
+import { bodyOf } from '../src/test/body-of';
 import { cleanQueues } from '../src/test/clean-queue';
 import { cleanStorage } from '../src/test/clean-storage';
 import { cleanAllTables } from '../src/test/create-test-data-source';
 import { User } from '../src/users/entities/user.entity';
+import type {
+  CreateVideoResponseDto,
+  PartUrlsResponseDto,
+} from '../src/videos/dto/upload-responses.dto';
 import { Video } from '../src/videos/entities/video.entity';
 import { VideoStatus } from '../src/videos/video-status.enum';
 import { WorkerModule } from '../src/worker/worker.module';
@@ -52,17 +57,21 @@ describe('Video processing pipeline (e2e)', () => {
 
   /** Uploads bytes through the real API + storage flow and completes the upload. */
   const upload = async (bytes: Buffer, contentType: string) => {
-    const { body: created } = await request(app.getHttpServer())
-      .post('/videos')
-      .set(auth())
-      .send({ filename: 'sample', contentType, sizeBytes: bytes.length })
-      .expect(201);
-    const { body: urls } = await request(app.getHttpServer())
-      .post(`/videos/${created.publicId}/upload/part-urls`)
-      .set(auth())
-      .send({ partNumbers: [1] })
-      .expect(200);
-    const put = await fetch(urls.parts[0].url as string, {
+    const created = await bodyOf<CreateVideoResponseDto>(
+      request(app.getHttpServer())
+        .post('/videos')
+        .set(auth())
+        .send({ filename: 'sample', contentType, sizeBytes: bytes.length })
+        .expect(201),
+    );
+    const urls = await bodyOf<PartUrlsResponseDto>(
+      request(app.getHttpServer())
+        .post(`/videos/${created.publicId}/upload/part-urls`)
+        .set(auth())
+        .send({ partNumbers: [1] })
+        .expect(200),
+    );
+    const put = await fetch(urls.parts[0].url, {
       method: 'PUT',
       body: new Uint8Array(bytes),
     });
@@ -72,7 +81,7 @@ describe('Video processing pipeline (e2e)', () => {
       .set(auth())
       .send({ parts: [{ partNumber: 1, etag: put.headers.get('etag') }] })
       .expect(202);
-    return created.publicId as string;
+    return created.publicId;
   };
 
   const waitForFinalStatus = async (publicId: string): Promise<Video> => {

@@ -32,23 +32,4 @@ export default tseslint.config(
       "prettier/prettier": ["error", { endOfLine: "auto" }],
     },
   },
-  {
-    // Test code: Jest mocks and supertest `res.body` are `any` by nature, so the
-    // type-safety rules below only produce noise there. They stay on for src code.
-    files: [
-      '**/*.spec.ts',
-      '**/*.integration-spec.ts',
-      '**/*.e2e-spec.ts',
-      'src/test/**/*.ts',
-      'test/**/*.ts',
-    ],
-    rules: {
-      '@typescript-eslint/no-unsafe-assignment': 'off',
-      '@typescript-eslint/no-unsafe-member-access': 'off',
-      '@typescript-eslint/no-unsafe-return': 'off',
-      '@typescript-eslint/no-unsafe-call': 'off',
-      '@typescript-eslint/no-unsafe-argument': 'off',
-      '@typescript-eslint/unbound-method': 'off',
-    },
-  },
 );

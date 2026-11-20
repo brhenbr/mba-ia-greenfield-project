@@ -12,7 +12,7 @@ This is a monorepo with two main areas:
 
 - `nestjs-project/` — Backend API (NestJS 11, TypeScript, Express). Contains modules for users, channels, videos, comments, etc.
 - `docs/` — Project documentation, architecture diagrams, and planning.
-- `next-frontend/` (Next.js) — not yet initialized
+- `next-frontend/` (Next.js) — frontend of Phases 01–02 (auth and channels); the video interface is out of scope until Phase 05
 
 ## Architecture (C4 Container Diagram)
 
